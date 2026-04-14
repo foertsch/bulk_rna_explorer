@@ -1,5 +1,7 @@
 # bulk_rna_explorer
 
+![CI](https://github.com/foertsch/bulk_rna_explorer/actions/workflows/ci.yml/badge.svg)
+
 Interactive Shiny app for exploring bulk RNA-seq DESeq2/EdgeR results. Supports multiple contrasts, dynamic column mapping, expression barplots, volcano plots, and PCA plots.
 
 ## Features
@@ -72,6 +74,8 @@ Rscript scripts/make_toy_data.R
 # Regenerate the Windows icon (requires Pillow)
 python3 scripts/make_icon.py
 ```
+
+CI (GitHub Actions) runs `testthat` on Ubuntu and a Shiny-launch smoke test on Windows for every push and PR to `main`.
 
 ## License
 

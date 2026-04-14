@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: testthat (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            testthat
+            ggplot2
+            dplyr
+            ggrepel
+            bioc::SummarizedExperiment
+
+      - name: Run tests
+        working-directory: .
+        run: Rscript tests/testthat.R
+
+  windows-smoke:
+    name: Shiny launch smoke (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            shiny
+            shinythemes
+            ggplot2
+            dplyr
+            colourpicker
+            shinyWidgets
+            DT
+            ggrepel
+            bioc::SummarizedExperiment
+
+      - name: Start Shiny app in background
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "Rscript" `
+            -ArgumentList '-e', "shiny::runApp('.', host='127.0.0.1', port=3838, launch.browser=FALSE)" `
+            -PassThru -NoNewWindow `
+            -RedirectStandardOutput shiny_stdout.log `
+            -RedirectStandardError shiny_stderr.log
+          $proc.Id | Out-File shiny.pid
+          Start-Sleep -Seconds 25
+
+      - name: Probe the server
+        shell: pwsh
+        run: |
+          try {
+            $r = Invoke-WebRequest -Uri "http://127.0.0.1:3838" -UseBasicParsing -TimeoutSec 15
+            Write-Host "Status: $($r.StatusCode)"
+            if ($r.StatusCode -ne 200) { exit 1 }
+          } catch {
+            Write-Host "Probe failed: $_"
+            Write-Host "--- stderr ---"
+            Get-Content shiny_stderr.log -ErrorAction SilentlyContinue
+            Write-Host "--- stdout ---"
+            Get-Content shiny_stdout.log -ErrorAction SilentlyContinue
+            exit 1
+          }
+
+      - name: Stop Shiny app
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path shiny.pid) {
+            $shinyPid = Get-Content shiny.pid
+            Stop-Process -Id $shinyPid -Force -ErrorAction SilentlyContinue
+          }
