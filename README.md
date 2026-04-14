@@ -19,7 +19,7 @@ Interactive Shiny app for exploring bulk RNA-seq DESeq2/EdgeR results. Supports 
 shiny::runApp("/path/to/bulk_rna_explorer")
 ```
 
-Upload `.rds` files via the browser to load contrasts on demand.
+The repo ships with two toy contrasts (`data/toy_contrast_A.rds`, `data/toy_contrast_B.rds`, ~25 KB each) you can upload from the file panel. Drop your own `.rds` files alongside them, or upload via the browser.
 
 ## Data format
 
@@ -52,7 +52,11 @@ Or open `app.R` in RStudio and click **Run App**.
 ## Development
 
 ```bash
+# Run tests
 Rscript tests/testthat.R
+
+# Regenerate toy datasets
+Rscript scripts/make_toy_data.R
 ```
 
 ## License
