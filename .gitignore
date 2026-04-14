@@ -1,0 +1,17 @@
+# Data files (too large for git) — but allow tiny toy datasets
+data/*.rds
+data/*.RDS
+data/*.rds.gz
+!data/toy_*.rds
+
+# R session files
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# macOS
+.DS_Store
+
+# rsconnect deployment
+rsconnect/
