@@ -49,6 +49,17 @@ shiny::runApp("/path/to/bulk_rna_explorer")
 
 Or open `app.R` in RStudio and click **Run App**.
 
+### Windows desktop shortcut
+
+For non-technical users, double-clicking `launch_windows.bat` starts the app and opens it in the default browser. To give the shortcut a proper icon:
+
+1. Right-click `launch_windows.bat` → **Create shortcut**
+2. (Optional) Move the shortcut to the Desktop and rename it
+3. Right-click the shortcut → **Properties** → **Change Icon...** → **Browse...**
+4. Select `icon.ico` from the repo folder → **OK** → **Apply**
+
+The launcher finds R on `PATH` first, then falls back to the newest install under `C:\Program Files\R\`. If R is missing it prints a message and waits for a keypress instead of flashing closed.
+
 ## Development
 
 ```bash
@@ -57,6 +68,9 @@ Rscript tests/testthat.R
 
 # Regenerate toy datasets
 Rscript scripts/make_toy_data.R
+
+# Regenerate the Windows icon (requires Pillow)
+python3 scripts/make_icon.py
 ```
 
 ## License
