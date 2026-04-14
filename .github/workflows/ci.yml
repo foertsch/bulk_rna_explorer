@@ -60,13 +60,18 @@ jobs:
       - name: Start Shiny app in background
         shell: pwsh
         run: |
+          # Write the R launch command to a file to avoid PowerShell quoting issues
+          @'
+          shiny::runApp(".", host = "127.0.0.1", port = 3838, launch.browser = FALSE)
+          '@ | Set-Content -Path run_app.R -Encoding ascii
+          Get-Content run_app.R
           $proc = Start-Process -FilePath "Rscript" `
-            -ArgumentList '-e', "shiny::runApp('.', host='127.0.0.1', port=3838, launch.browser=FALSE)" `
+            -ArgumentList "run_app.R" `
             -PassThru -NoNewWindow `
             -RedirectStandardOutput shiny_stdout.log `
             -RedirectStandardError shiny_stderr.log
           $proc.Id | Out-File shiny.pid
-          Start-Sleep -Seconds 25
+          Start-Sleep -Seconds 30
 
       - name: Probe the server
         shell: pwsh
