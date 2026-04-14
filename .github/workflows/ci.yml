@@ -22,11 +22,12 @@ jobs:
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           packages: |
-            testthat
-            ggplot2
-            dplyr
-            ggrepel
+            any::testthat
+            any::ggplot2
+            any::dplyr
+            any::ggrepel
             bioc::SummarizedExperiment
+          dependencies: '"hard"'
 
       - name: Run tests
         working-directory: .
@@ -45,15 +46,16 @@ jobs:
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           packages: |
-            shiny
-            shinythemes
-            ggplot2
-            dplyr
-            colourpicker
-            shinyWidgets
-            DT
-            ggrepel
+            any::shiny
+            any::shinythemes
+            any::ggplot2
+            any::dplyr
+            any::colourpicker
+            any::shinyWidgets
+            any::DT
+            any::ggrepel
             bioc::SummarizedExperiment
+          dependencies: '"hard"'
 
       - name: Start Shiny app in background
         shell: pwsh
