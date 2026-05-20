@@ -91,7 +91,9 @@ jobs:
               # heartbeat with whatever the R process has logged so far, so a
               # slow startup is visible in the action log instead of opaque.
               if ($i % 15 -eq 0) {
-                Write-Host "Attempt $i: still waiting. Current stderr tail:"
+                # ${i} braces are required — PowerShell otherwise reads
+                # `$i:` as a scoped variable reference and refuses to parse.
+                Write-Host "Attempt ${i}: still waiting. Current stderr tail:"
                 Get-Content shiny_stderr.log -Tail 20 -ErrorAction SilentlyContinue
               }
             }
