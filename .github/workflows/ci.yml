@@ -54,6 +54,7 @@ jobs:
             any::shinyWidgets
             any::DT
             any::ggrepel
+            any::BiocManager
             bioc::SummarizedExperiment
           dependencies: '"hard"'
 
@@ -74,7 +75,7 @@ jobs:
       - name: Probe the server (poll until ready)
         shell: pwsh
         run: |
-          $maxAttempts = 45   # ~90 s total
+          $maxAttempts = 90   # ~180 s total — Windows R + library(SE) is slow
           $ok = $false
           for ($i = 1; $i -le $maxAttempts; $i++) {
             Start-Sleep -Seconds 2
@@ -86,7 +87,13 @@ jobs:
                 break
               }
             } catch {
-              # Still starting — keep polling
+              # Still starting — keep polling. Every 15 attempts, surface a
+              # heartbeat with whatever the R process has logged so far, so a
+              # slow startup is visible in the action log instead of opaque.
+              if ($i % 15 -eq 0) {
+                Write-Host "Attempt $i: still waiting. Current stderr tail:"
+                Get-Content shiny_stderr.log -Tail 20 -ErrorAction SilentlyContinue
+              }
             }
           }
           if (-not $ok) {

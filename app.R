@@ -6,19 +6,27 @@
 # ============================================================
 
 # --- Dependency Installation ---
+# Only install what's actually missing. In particular, do NOT pull BiocManager
+# from CRAN when all bioc_packages are already present (this matters for CI:
+# pak installs SummarizedExperiment directly but not BiocManager, and the
+# unconditional CRAN call delayed the Shiny Windows smoke past its timeout).
 install_if_missing <- function(packages, bioc_packages = NULL) {
-  for (pkg in packages) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      message("Installing ", pkg, "...")
-      install.packages(pkg, repos = "https://cloud.r-project.org")
-    }
+  missing_cran <- packages[
+    !vapply(packages, requireNamespace, logical(1), quietly = TRUE)
+  ]
+  for (pkg in missing_cran) {
+    message("Installing ", pkg, "...")
+    install.packages(pkg, repos = "https://cloud.r-project.org")
   }
   if (!is.null(bioc_packages)) {
-    if (!requireNamespace("BiocManager", quietly = TRUE)) {
-      install.packages("BiocManager", repos = "https://cloud.r-project.org")
-    }
-    for (pkg in bioc_packages) {
-      if (!requireNamespace(pkg, quietly = TRUE)) {
+    missing_bioc <- bioc_packages[
+      !vapply(bioc_packages, requireNamespace, logical(1), quietly = TRUE)
+    ]
+    if (length(missing_bioc) > 0) {
+      if (!requireNamespace("BiocManager", quietly = TRUE)) {
+        install.packages("BiocManager", repos = "https://cloud.r-project.org")
+      }
+      for (pkg in missing_bioc) {
         message("Installing ", pkg, " from Bioconductor...")
         BiocManager::install(pkg, ask = FALSE, update = FALSE)
       }
