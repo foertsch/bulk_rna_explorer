@@ -7,7 +7,7 @@ Interactive Shiny app for exploring bulk RNA-seq DESeq2/EdgeR results. Supports 
 ## Features
 
 - **Multi-dataset support**: Load multiple RDS files on demand, switch between contrasts
-- **Dynamic column mapping**: Auto-detects assays, grouping columns, DE statistics, and gene symbols — works with any `SummarizedExperiment`
+- **Dynamic column mapping**: Auto-detects assays, grouping columns, DE statistics, and gene symbols; works with any `SummarizedExperiment`
 - **Expression barplots**: Mean + SD + jittered points, grouped by any `colData` column, optional second grouping
 - **Volcano plots**: log2FC vs -log10(FDR) with adjustable thresholds, click-to-plot, top-gene labels
 - **PCA plots**: Top-N variable genes, selectable PC axes, colored by group, shaped by optional second group
@@ -49,7 +49,7 @@ Auto-installed on first run.
 shiny::runApp("/path/to/bulk_rna_explorer")
 ```
 
-Or open `app.R` in RStudio and click **Run App**.
+Or open `app.R` in RStudio and click **Run App**. The same command works on macOS, Linux, and Windows; no platform-specific setup is required beyond having R installed.
 
 ### Windows desktop shortcut
 
@@ -75,8 +75,8 @@ Rscript scripts/make_toy_data.R
 python3 scripts/make_icon.py
 ```
 
-CI (GitHub Actions) runs `testthat` on Ubuntu and a Shiny-launch smoke test on Windows for every push and PR to `main`.
+CI (GitHub Actions) runs `testthat` on Ubuntu and macOS, a `lintr` check on Ubuntu, and a Shiny construction smoke test on Windows for every push and PR to `main`.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
