@@ -212,19 +212,9 @@ ui <- fluidPage(
           type = "tabs",
 
           tabPanel(
-            "Expression Plot",
+            "PCA Plot",
             br(),
-            plotOutput("barplot", height = "500px"),
-            hr(),
-            h4("Selected Gene Information"),
-            DTOutput("gene_info")
-          ),
-
-          tabPanel(
-            "Gene Search",
-            br(),
-            helpText("Click a row to select that gene for plotting."),
-            DTOutput("gene_search_table")
+            plotOutput("pca", height = "600px")
           ),
 
           tabPanel(
@@ -236,9 +226,19 @@ ui <- fluidPage(
           ),
 
           tabPanel(
-            "PCA Plot",
+            "Gene Search",
             br(),
-            plotOutput("pca", height = "600px")
+            helpText("Click a row to select that gene for plotting."),
+            DTOutput("gene_search_table")
+          ),
+
+          tabPanel(
+            "Expression Plot",
+            br(),
+            plotOutput("barplot", height = "500px"),
+            hr(),
+            h4("Selected Gene Information"),
+            DTOutput("gene_info")
           )
         ),
         width = 9

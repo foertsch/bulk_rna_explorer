@@ -15,15 +15,36 @@ make_toy_se <- function(seed, up_idx, down_idx,
   sample_ids <- paste0("s", sprintf("%02d", seq_len(n_samples)))
   gene_ids <- paste0("ENSG", sprintf("%05d", seq_len(n_genes)))
 
+  conditions <- rep(c("cond_A", "cond_B", "cond_C"), length.out = n_samples)
+  dox <- rep(c("ctrl", "Dox"), length.out = n_samples)
+
+  # --- DE statistics (drive the volcano / gene table) ---
+  # Seed deterministic UP / DOWN hits so each contrast looks different.
+  log2Ratio <- rnorm(n_genes, sd = 1.2)
+  fdr <- runif(n_genes, 0.05, 1)
+  log2Ratio[up_idx] <- runif(length(up_idx), 1.5, 4)
+  fdr[up_idx] <- runif(length(up_idx), 1e-5, 0.01)
+  log2Ratio[down_idx] <- runif(length(down_idx), -4, -1.5)
+  fdr[down_idx] <- runif(length(down_idx), 1e-5, 0.01)
+  pValue <- fdr * runif(n_genes, 0.5, 1)
+
+  # --- Expression with a real across-condition effect for DE genes ---
+  # cond_A is the baseline; the effect ramps cond_A -> cond_B -> cond_C so the
+  # reported log2Ratio matches log2(cond_C / cond_A). Non-DE genes stay flat, so
+  # significant genes also look differentially expressed in the barplot and
+  # separate by condition in PCA.
+  base_lambda <- 80
+  cond_step <- (match(conditions, c("cond_A", "cond_B", "cond_C")) - 1) / 2
+  gene_effect <- numeric(n_genes)
+  gene_effect[c(up_idx, down_idx)] <- log2Ratio[c(up_idx, down_idx)]
+  lambda_mat <- base_lambda * 2^outer(gene_effect, cond_step)
+
   counts <- matrix(
-    rpois(n_genes * n_samples, lambda = 80),
+    rpois(n_genes * n_samples, lambda = as.vector(lambda_mat)),
     nrow = n_genes, ncol = n_samples,
     dimnames = list(gene_ids, sample_ids)
   )
   xNorm <- counts * runif(length(counts), 0.8, 1.2)
-
-  conditions <- rep(c("cond_A", "cond_B", "cond_C"), length.out = n_samples)
-  dox <- rep(c("ctrl", "Dox"), length.out = n_samples)
 
   cd <- DataFrame(Sample = sample_ids, check.names = FALSE)
   cd$`Condition [Factor]` <- factor(conditions,
@@ -34,16 +55,10 @@ make_toy_se <- function(seed, up_idx, down_idx,
   rd <- DataFrame(
     gene_id = gene_ids,
     gene_name = paste0("SYM", seq_len(n_genes)),
-    log2Ratio = rnorm(n_genes, sd = 1.2),
-    fdr = runif(n_genes, 0.05, 1),
-    pValue = runif(n_genes, 0.05, 1)
+    log2Ratio = log2Ratio,
+    fdr = fdr,
+    pValue = pValue
   )
-  # Seed deterministic UP / DOWN hits so each contrast looks different
-  rd$log2Ratio[up_idx] <- runif(length(up_idx), 1.5, 4)
-  rd$fdr[up_idx] <- runif(length(up_idx), 1e-5, 0.01)
-  rd$log2Ratio[down_idx] <- runif(length(down_idx), -4, -1.5)
-  rd$fdr[down_idx] <- runif(length(down_idx), 1e-5, 0.01)
-  rd$pValue <- rd$fdr * runif(n_genes, 0.5, 1)
 
   SummarizedExperiment(
     assays = list(counts = counts, xNorm = xNorm),

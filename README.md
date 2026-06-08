@@ -4,6 +4,11 @@
 
 Interactive Shiny app for exploring bulk RNA-seq DESeq2/EdgeR results. Supports multiple contrasts, dynamic column mapping, expression barplots, volcano plots, and PCA plots.
 
+<p align="center">
+  <img src="docs/demo.gif" alt="End-to-end demo: explore PCA, scan the volcano, search a gene, and view its expression across conditions" width="900">
+</p>
+<p align="center"><em>End-to-end workflow on the bundled toy data: PCA &rarr; volcano &rarr; gene search &rarr; expression barplot.</em></p>
+
 ## Features
 
 - **Multi-dataset support**: Load multiple RDS files on demand, switch between contrasts
@@ -14,6 +19,19 @@ Interactive Shiny app for exploring bulk RNA-seq DESeq2/EdgeR results. Supports 
 - **Gene search table**: Filterable DE statistics with click-to-plot
 - **Dynamic color pickers**: One per detected group level, auto-generated palette
 - **Download**: PNG and PDF for all plots
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshot_pca.png" alt="PCA plot colored by group and shaped by second group"></td>
+    <td width="33%"><img src="docs/screenshot_volcano.png" alt="Volcano plot with adjustable thresholds and top-gene labels"></td>
+    <td width="33%"><img src="docs/screenshot_expression.png" alt="Expression barplot with group filters, color pickers, and per-gene DE statistics"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>PCA: top-N variable genes, colored by group, shaped by second group.</em></td>
+    <td align="center"><em>Volcano: adjustable log2FC/FDR thresholds, top-gene labels, click-to-plot.</em></td>
+    <td align="center"><em>Expression: group filtering, dynamic colors, per-gene DE stats.</em></td>
+  </tr>
+</table>
 
 ## Quick start
 

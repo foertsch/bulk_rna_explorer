@@ -26,8 +26,8 @@ test_that("generate_palette returns n colors", {
   expect_length(generate_palette(15), 15)
 })
 
-test_that("generate_palette uses the fixed palette for n <= 8", {
-  expect_equal(generate_palette(3)[1], "#808080")
+test_that("generate_palette uses the scanpy vega palette for small n", {
+  expect_equal(generate_palette(3), c("#1f77b4", "#ff7f0e", "#279e68"))
 })
 
 test_that("generate_palette returns valid hex colors", {

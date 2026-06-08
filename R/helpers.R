@@ -16,12 +16,17 @@ sanitize_name <- function(x) {
 }
 
 #' Generate a default color palette for N conditions
+#' Uses scanpy's default categorical palettes (vega_10_scanpy / vega_20_scanpy)
+#' for vivid, well-separated group colors; falls back to HCL for n > 20.
 generate_palette <- function(n) {
-  if (n <= 8) {
-    cols <- c("#808080", "#D4E6F1", "#7F9FB6", "#337996",
-              "#085778", "#023E57", "#A3BE8C", "#BF616A")
-    return(cols[seq_len(n)])
-  }
+  vega_10 <- c("#1f77b4", "#ff7f0e", "#279e68", "#d62728", "#aa40fc",
+               "#8c564b", "#e377c2", "#7f7f7f", "#b5bd61", "#17becf")
+  vega_20 <- c("#1f77b4", "#ff7f0e", "#279e68", "#d62728", "#aa40fc",
+               "#8c564b", "#e377c2", "#b5bd61", "#17becf", "#aec7e8",
+               "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5", "#c49c94",
+               "#f7b6d2", "#dbdb8d", "#9edae5", "#ad494a", "#8c6d31")
+  if (n <= 10) return(vega_10[seq_len(n)])
+  if (n <= 20) return(vega_20[seq_len(n)])
   hcl.colors(n, palette = "Dark 3")
 }
 
