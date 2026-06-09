@@ -6,10 +6,8 @@
 # ============================================================
 
 # --- Dependency Installation ---
-# Only install what's actually missing. In particular, do NOT pull BiocManager
-# from CRAN when all bioc_packages are already present (this matters for CI:
-# pak installs SummarizedExperiment directly but not BiocManager, and the
-# unconditional CRAN call delayed the Shiny Windows smoke past its timeout).
+# Install only missing packages; in particular don't pull BiocManager when the
+# bioc_packages are already present (an unconditional CRAN call slows CI).
 install_if_missing <- function(packages, bioc_packages = NULL) {
   missing_cran <- packages[
     !vapply(packages, requireNamespace, logical(1), quietly = TRUE)
@@ -56,6 +54,23 @@ library(ggrepel)
 # For other entry points (e.g. sourcing app.R directly), fall back to file.path
 # relative to the running script.
 source(file.path("R", "helpers.R"))
+
+# Register a PNG + PDF download pair for a plot reactive. The filename is
+# "<basename_fn()>_<prefix>.<ext>"; PNG gets dpi/white background, PDF is vector.
+register_downloads <- function(output, prefix, plot_reactive, basename_fn,
+                               width, height) {
+  save_plot <- function(...) function(file) {
+    ggsave(file, plot = plot_reactive(), width = width, height = height, ...)
+  }
+  output[[paste0("download_", prefix, "_png")]] <- downloadHandler(
+    filename = function() paste0(basename_fn(), "_", prefix, ".png"),
+    content = save_plot(dpi = 300, bg = "white")
+  )
+  output[[paste0("download_", prefix, "_pdf")]] <- downloadHandler(
+    filename = function() paste0(basename_fn(), "_", prefix, ".pdf"),
+    content = save_plot()
+  )
+}
 
 # --- UI ---
 
@@ -330,8 +345,6 @@ server <- function(input, output, session) {
     data <- withProgress(
       message = paste("Loading", name, "..."), value = 0.5,
       {
-        # load_dataset autodetects the format and returns a
-        # SummarizedExperiment, or errors with an actionable message.
         tryCatch(load_dataset(path), error = function(e) e)
       }
     )
@@ -355,47 +368,45 @@ server <- function(input, output, session) {
     data
   })
 
+  # ---- Shared derived reactives ----
+  rd <- reactive(as.data.frame(rowData(se()), check.names = FALSE))
+  second_group_col <- reactive(none_to_null(input$second_group, "None"))
+  fc_sel <- reactive(none_to_null(input$fc_col))
+  fdr_sel <- reactive(none_to_null(input$fdr_col))
+
   # ---- Column mapping: update choices when dataset changes ----
   observeEvent(se(), {
     se_obj <- se()
-    rd_cols <- colnames(as.data.frame(rowData(se_obj), check.names = FALSE))
+    rd_cols <- colnames(rd())
     cat_cols <- get_categorical_cols(se_obj)
     assay_choices <- assayNames(se_obj)
 
-    # Assay
     assay_sel <- if ("xNorm" %in% assay_choices) "xNorm" else assay_choices[1]
     updateSelectInput(session, "assay_name", choices = assay_choices,
                       selected = assay_sel)
 
-    # Group column
     group_sel <- if ("Condition" %in% cat_cols) "Condition" else cat_cols[1]
     updateSelectInput(session, "group_col", choices = cat_cols,
                       selected = group_sel)
 
-    # Second group
     second_choices <- c("None", cat_cols)
     second_sel <- if ("Dox" %in% cat_cols) "Dox" else "None"
     updateSelectInput(session, "second_group", choices = second_choices,
                       selected = second_sel)
 
-    # Gene symbol column
     gene_col <- detect_gene_col(rd_cols)
     gene_choices <- c("(rownames)", rd_cols)
     gene_sel <- if (!is.null(gene_col)) gene_col else "(rownames)"
     updateSelectInput(session, "gene_symbol_col", choices = gene_choices,
                       selected = gene_sel)
 
-    # DE columns
     de <- detect_de_columns(rd_cols)
-    rd_choices_fc <- c("(none)", rd_cols)
-    rd_choices_fdr <- c("(none)", rd_cols)
-    rd_choices_pval <- c("(none)", rd_cols)
-
-    updateSelectInput(session, "fc_col", choices = rd_choices_fc,
+    de_choices <- c("(none)", rd_cols)
+    updateSelectInput(session, "fc_col", choices = de_choices,
                       selected = if (!is.na(de$fc)) de$fc else "(none)")
-    updateSelectInput(session, "fdr_col", choices = rd_choices_fdr,
+    updateSelectInput(session, "fdr_col", choices = de_choices,
                       selected = if (!is.na(de$fdr)) de$fdr else "(none)")
-    updateSelectInput(session, "pval_col", choices = rd_choices_pval,
+    updateSelectInput(session, "pval_col", choices = de_choices,
                       selected = if (!is.na(de$pval)) de$pval else "(none)")
   })
 
@@ -470,13 +481,12 @@ server <- function(input, output, session) {
 
   # ---- Populate gene choices ----
   observe({
-    req(se())
-    rd <- as.data.frame(rowData(se()), check.names = FALSE)
-    gene_ids <- rownames(rd)
+    rd_df <- rd()
+    gene_ids <- rownames(rd_df)
 
     sym_col <- gene_sym_col()
-    if (!is.null(sym_col) && sym_col %in% colnames(rd)) {
-      gene_symbols <- rd[[sym_col]]
+    if (!is.null(sym_col) && sym_col %in% colnames(rd_df)) {
+      gene_symbols <- rd_df[[sym_col]]
       gene_symbols[is.na(gene_symbols)] <- gene_ids[is.na(gene_symbols)]
     } else {
       gene_symbols <- gene_ids
@@ -491,18 +501,12 @@ server <- function(input, output, session) {
     req(input$gene, input$assay_name, input$group_col)
     req(length(input$conditions) > 0)
 
-    second <- if (!is.null(input$second_group) && input$second_group != "None") {
-      input$second_group
-    } else {
-      NULL
-    }
-
     create_barplot(
       se = se(),
       gene = input$gene,
       assay_name = input$assay_name,
       group_col = input$group_col,
-      second_group = second,
+      second_group = second_group_col(),
       group_levels = input$conditions,
       group_colors = current_colors(),
       ctrl_alpha = input$ctrl_alpha,
@@ -515,20 +519,11 @@ server <- function(input, output, session) {
   # ---- Gene info table ----
   output$gene_info <- renderDT({
     req(input$gene)
-    rd <- as.data.frame(rowData(se()), check.names = FALSE)
-    info <- rd[input$gene, , drop = FALSE]
+    info <- rd()[input$gene, , drop = FALSE]
 
-    # Show relevant columns
-    sym_col <- gene_sym_col()
-    display_cols <- c(sym_col, input$fc_col, input$fdr_col, input$pval_col)
-    display_cols <- display_cols[!is.null(display_cols) & display_cols != "(none)"]
-    display_cols <- intersect(display_cols, colnames(info))
-
-    if (length(display_cols) == 0) {
-      info_display <- info[, seq_len(min(5, ncol(info))), drop = FALSE]
-    } else {
-      info_display <- info[, display_cols, drop = FALSE]
-    }
+    info_display <- select_cols(
+      info, c(gene_sym_col(), input$fc_col, input$fdr_col, input$pval_col)
+    )
     rownames(info_display) <- NULL
 
     num_cols <- names(info_display)[sapply(info_display, is.numeric)]
@@ -542,31 +537,15 @@ server <- function(input, output, session) {
 
   # ---- Gene search table ----
   gene_table_data <- reactive({
-    req(se())
-    rd <- as.data.frame(rowData(se()), check.names = FALSE)
+    rd_df <- rd()
+    fc <- fc_sel()
+    fdr <- fdr_sel()
 
-    fc <- if (input$fc_col != "(none)") input$fc_col else NULL
-    fdr <- if (input$fdr_col != "(none)") input$fdr_col else NULL
-    sym_col <- gene_sym_col()
+    df <- select_cols(rd_df, c(gene_sym_col(), fc, fdr, input$pval_col))
 
-    display_cols <- c(sym_col, fc, fdr, input$pval_col)
-    display_cols <- display_cols[!is.null(display_cols) & display_cols != "(none)"]
-    display_cols <- intersect(display_cols, colnames(rd))
-
-    if (length(display_cols) == 0) {
-      df <- rd[, seq_len(min(5, ncol(rd))), drop = FALSE]
-    } else {
-      df <- rd[, display_cols, drop = FALSE]
-    }
-
-    # Add status if FC and FDR columns exist
     if (!is.null(fc) && !is.null(fdr) && fc %in% colnames(df) && fdr %in% colnames(df)) {
-      df$Status <- case_when(
-        df[[fdr]] < input$fdr_threshold & df[[fc]] > input$log2fc_threshold ~ "UP",
-        df[[fdr]] < input$fdr_threshold & df[[fc]] < -input$log2fc_threshold ~ "DOWN",
-        TRUE ~ "NS"
-      )
-
+      df$Status <- classify_de_status(df[[fc]], df[[fdr]],
+                                      input$log2fc_threshold, input$fdr_threshold)
       if (input$de_filter == "sig") df <- df[df$Status != "NS", ]
       else if (input$de_filter == "up") df <- df[df$Status == "UP", ]
       else if (input$de_filter == "down") df <- df[df$Status == "DOWN", ]
@@ -617,10 +596,8 @@ server <- function(input, output, session) {
   # ---- Volcano plot ----
   volcano_df <- reactive({
     req(se())
-    fc <- if (!is.null(input$fc_col) && input$fc_col != "(none)") input$fc_col else NULL
-    fdr <- if (!is.null(input$fdr_col) && input$fdr_col != "(none)") input$fdr_col else NULL
     build_volcano_df(
-      se = se(), fc_col = fc, fdr_col = fdr,
+      se = se(), fc_col = fc_sel(), fdr_col = fdr_sel(),
       gene_symbol_col = gene_sym_col(),
       fc_thresh = input$volcano_fc,
       fdr_thresh = input$volcano_fdr
@@ -628,11 +605,10 @@ server <- function(input, output, session) {
   })
 
   current_volcano <- reactive({
-    fc <- if (!is.null(input$fc_col) && input$fc_col != "(none)") input$fc_col else "log2FC"
-    fdr <- if (!is.null(input$fdr_col) && input$fdr_col != "(none)") input$fdr_col else "FDR"
     create_volcano(
       df = volcano_df(),
-      fc_col = fc, fdr_col = fdr,
+      fc_col = if (is.null(fc_sel())) "log2FC" else fc_sel(),
+      fdr_col = if (is.null(fdr_sel())) "FDR" else fdr_sel(),
       fc_thresh = input$volcano_fc,
       fdr_thresh = input$volcano_fdr,
       n_labels = input$volcano_nlabels
@@ -655,22 +631,20 @@ server <- function(input, output, session) {
   })
 
   # ---- PCA plot ----
+  # Heavy step (rowVars + prcomp) cached on se/assay/ntop; re-plotting on a
+  # color, axis, or ellipse change reuses it.
+  pca_data <- reactive({
+    req(se(), input$assay_name)
+    compute_pca(se(), input$assay_name, input$pca_ntop)
+  })
+
   current_pca <- reactive({
-    req(se(), input$assay_name, input$group_col)
-
-    second <- if (!is.null(input$second_group) && input$second_group != "None") {
-      input$second_group
-    } else {
-      NULL
-    }
-
-    create_pca(
-      se = se(),
-      assay_name = input$assay_name,
+    req(input$group_col)
+    plot_pca(
+      pca_data(), se(),
       group_col = input$group_col,
-      second_group = second,
+      second_group = second_group_col(),
       group_colors = current_colors(),
-      ntop = input$pca_ntop,
       pc_x = as.integer(gsub("PC", "", input$pca_pc_x)),
       pc_y = as.integer(gsub("PC", "", input$pca_pc_y)),
       show_ellipses = isTRUE(input$pca_ellipses)
@@ -680,67 +654,20 @@ server <- function(input, output, session) {
   output$pca <- renderPlot({ current_pca() })
 
   # ---- Download handlers ----
+  # Barplot files are named by gene symbol; volcano/PCA by dataset name.
+  barplot_sym <- reactive({
+    sym <- tryCatch({
+      s <- gene_sym_col()
+      if (!is.null(s)) rd()[input$gene, s] else input$gene
+    }, error = function(e) input$gene)
+    if (is.na(sym)) input$gene else sym
+  })
 
-  # Barplot
-  output$download_barplot_png <- downloadHandler(
-    filename = function() {
-      sym <- tryCatch({
-        rd <- as.data.frame(rowData(se()), check.names = FALSE)
-        s <- gene_sym_col()
-        if (!is.null(s)) rd[input$gene, s] else input$gene
-      }, error = function(e) input$gene)
-      if (is.na(sym)) sym <- input$gene
-      paste0(sym, "_barplot.png")
-    },
-    content = function(file) {
-      ggsave(file, plot = current_barplot(), width = 10, height = 6, dpi = 300, bg = "white")
-    }
-  )
-
-  output$download_barplot_pdf <- downloadHandler(
-    filename = function() {
-      sym <- tryCatch({
-        rd <- as.data.frame(rowData(se()), check.names = FALSE)
-        s <- gene_sym_col()
-        if (!is.null(s)) rd[input$gene, s] else input$gene
-      }, error = function(e) input$gene)
-      if (is.na(sym)) sym <- input$gene
-      paste0(sym, "_barplot.pdf")
-    },
-    content = function(file) {
-      ggsave(file, plot = current_barplot(), width = 10, height = 6)
-    }
-  )
-
-  # Volcano
-  output$download_volcano_png <- downloadHandler(
-    filename = function() paste0(input$active_dataset, "_volcano.png"),
-    content = function(file) {
-      ggsave(file, plot = current_volcano(), width = 10, height = 8, dpi = 300, bg = "white")
-    }
-  )
-
-  output$download_volcano_pdf <- downloadHandler(
-    filename = function() paste0(input$active_dataset, "_volcano.pdf"),
-    content = function(file) {
-      ggsave(file, plot = current_volcano(), width = 10, height = 8)
-    }
-  )
-
-  # PCA
-  output$download_pca_png <- downloadHandler(
-    filename = function() paste0(input$active_dataset, "_pca.png"),
-    content = function(file) {
-      ggsave(file, plot = current_pca(), width = 10, height = 8, dpi = 300, bg = "white")
-    }
-  )
-
-  output$download_pca_pdf <- downloadHandler(
-    filename = function() paste0(input$active_dataset, "_pca.pdf"),
-    content = function(file) {
-      ggsave(file, plot = current_pca(), width = 10, height = 8)
-    }
-  )
+  register_downloads(output, "barplot", current_barplot, barplot_sym, 10, 6)
+  register_downloads(output, "volcano", current_volcano,
+                     reactive(input$active_dataset), 10, 8)
+  register_downloads(output, "pca", current_pca,
+                     reactive(input$active_dataset), 10, 8)
 }
 
 # --- Run App ---

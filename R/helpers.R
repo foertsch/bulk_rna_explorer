@@ -61,6 +61,19 @@ get_categorical_cols <- function(se) {
   cat_cols
 }
 
+#' Map a UI "no selection" sentinel ("(none)"/"None") to NULL, else pass through
+none_to_null <- function(x, sentinel = "(none)") {
+  if (is.null(x) || identical(x, sentinel)) NULL else x
+}
+
+#' Subset a data.frame to the requested columns (dropping sentinels / absent ones)
+#' Falls back to the first `fallback_n` columns when none of `cols` are usable.
+select_cols <- function(df, cols, fallback_n = 5) {
+  cols <- intersect(cols[cols != "(none)"], colnames(df))
+  if (length(cols) == 0) cols <- seq_len(min(fallback_n, ncol(df)))
+  df[, cols, drop = FALSE]
+}
+
 # --- Plot Functions ---
 
 #' Create barplot for gene expression
@@ -128,7 +141,6 @@ create_barplot <- function(
     )
   }
 
-  # Summarise
   if (has_second) {
     df_sum <- df %>%
       group_by(Group, SecondGroup) %>%
@@ -192,6 +204,15 @@ create_barplot <- function(
     guides(fill = guide_legend(title = sanitize_name(group_col)))
 }
 
+#' Classify genes UP / DOWN / NS from log2FC + FDR vectors against thresholds
+classify_de_status <- function(log2fc, fdr, fc_thresh, fdr_thresh) {
+  case_when(
+    fdr < fdr_thresh & log2fc > fc_thresh ~ "UP",
+    fdr < fdr_thresh & log2fc < -fc_thresh ~ "DOWN",
+    TRUE ~ "NS"
+  )
+}
+
 #' Build volcano data frame from rowData (with gene_id, log2FC, fdr, symbol, Status)
 build_volcano_df <- function(se, fc_col, fdr_col, gene_symbol_col = NULL,
                              fc_thresh = 1, fdr_thresh = 0.05) {
@@ -212,12 +233,10 @@ build_volcano_df <- function(se, fc_col, fdr_col, gene_symbol_col = NULL,
   }
   df <- df %>% filter(!is.na(log2FC), !is.na(fdr), fdr > 0)
   df$neg_log10_fdr <- -log10(df$fdr)
-  df$Status <- case_when(
-    df$fdr < fdr_thresh & df$log2FC > fc_thresh ~ "UP",
-    df$fdr < fdr_thresh & df$log2FC < -fc_thresh ~ "DOWN",
-    TRUE ~ "NS"
+  df$Status <- factor(
+    classify_de_status(df$log2FC, df$fdr, fc_thresh, fdr_thresh),
+    levels = c("UP", "DOWN", "NS")
   )
-  df$Status <- factor(df$Status, levels = c("UP", "DOWN", "NS"))
   df
 }
 
@@ -256,30 +275,33 @@ create_volcano <- function(df, fc_col = "log2FC", fdr_col = "FDR",
     theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 }
 
-#' Create PCA plot
-create_pca <- function(
-    se, assay_name, group_col, second_group = NULL,
-    group_colors = NULL, ntop = 500,
-    pc_x = 1, pc_y = 2, show_ellipses = FALSE
-) {
+#' Run PCA on the top-N variable genes (the heavy step: rowVars + prcomp)
+#' Returned value depends only on se/assay/ntop, so callers can cache it and
+#' re-plot (different axes, colors, ellipses) without recomputing.
+compute_pca <- function(se, assay_name, ntop = 500) {
   mat <- log2(assay(se, assay_name) + 1)
-
-  # Select top variable genes
-  rv <- apply(mat, 1, var, na.rm = TRUE)
+  rv <- rowVars(mat, na.rm = TRUE)
   ntop <- min(ntop, nrow(mat))
   select_genes <- order(rv, decreasing = TRUE)[seq_len(ntop)]
-  mat_top <- mat[select_genes, ]
+  pca <- prcomp(t(mat[select_genes, ]), center = TRUE, scale. = FALSE)
+  list(
+    x = pca$x,
+    pct_var = round(100 * pca$sdev^2 / sum(pca$sdev^2), 1),
+    samples = colnames(se)
+  )
+}
 
-  # PCA
-  pca <- prcomp(t(mat_top), center = TRUE, scale. = FALSE)
-  pct_var <- round(100 * pca$sdev^2 / sum(pca$sdev^2), 1)
-
+#' Build the PCA ggplot from a precomputed compute_pca() result
+plot_pca <- function(pca, se, group_col, second_group = NULL,
+                     group_colors = NULL, pc_x = 1, pc_y = 2,
+                     show_ellipses = FALSE) {
   md <- as.data.frame(colData(se), check.names = FALSE)
   colnames(md) <- sanitize_name(colnames(md))
   group_col <- sanitize_name(group_col)
+  pct_var <- pca$pct_var
 
   pca_df <- data.frame(
-    Sample = colnames(se),
+    Sample = pca$samples,
     PCx = pca$x[, pc_x],
     PCy = pca$x[, pc_y],
     Group = md[[group_col]],
@@ -323,17 +345,18 @@ create_pca <- function(
     theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 }
 
-# ============================================================
-# Input loading + format conversion
-# ------------------------------------------------------------
-# load_dataset(path) is the single public entry point, used by both
-# app.R (live upload) and scripts/convert_to_se.R (batch conversion).
-# It autodetects the file type, reads it, and returns a
-# SummarizedExperiment, or throws an error with an actionable message.
-#
-# Optional readers (qs2, qs, arrow) are required lazily, so they are
-# only needed when a file of that type is actually opened.
-# ============================================================
+#' Create PCA plot (compute + plot in one call)
+create_pca <- function(se, assay_name, group_col, second_group = NULL,
+                       group_colors = NULL, ntop = 500,
+                       pc_x = 1, pc_y = 2, show_ellipses = FALSE) {
+  plot_pca(compute_pca(se, assay_name, ntop), se, group_col, second_group,
+           group_colors, pc_x, pc_y, show_ellipses)
+}
+
+# ---- Input loading + format conversion ----
+# load_dataset(path) is the single public entry point (app.R + convert_to_se.R).
+# Optional readers (qs2, qs, arrow) are required lazily, only when such a file
+# is opened.
 
 #' Require an optional package, with an install hint if it is missing
 require_pkg <- function(pkg) {
@@ -343,14 +366,9 @@ require_pkg <- function(pkg) {
   }
 }
 
-#' Detect a file's container type from its extension
-#' Returns one of: "rds", "qs2", "qs", "delim", "parquet", "feather",
-#' "unknown". Transparent to a trailing .gz (e.g. counts.csv.gz -> "delim").
+#' Detect a file's container type from its extension (transparent to .gz/.bz2/.xz)
 detect_file_type <- function(path) {
-  ext <- tolower(tools::file_ext(path))
-  if (ext == "gz") {
-    ext <- tolower(tools::file_ext(tools::file_path_sans_ext(path)))
-  }
+  ext <- tolower(tools::file_ext(sub("\\.(gz|bz2|xz)$", "", path, ignore.case = TRUE)))
   switch(ext,
     rds = "rds",
     qs2 = "qs2",
@@ -365,9 +383,7 @@ detect_file_type <- function(path) {
   )
 }
 
-#' Sniff the field delimiter of a text file (tab, comma, or semicolon)
-#' Picks whichever character is most frequent across the first n non-empty
-#' lines; defaults to tab when nothing is found.
+#' Sniff the field delimiter of a text file (most frequent of tab, comma, semicolon)
 sniff_delim <- function(path, n = 5) {
   con <- file(path, "rt")
   on.exit(close(con))
@@ -433,35 +449,33 @@ classify_table <- function(df) {
   if (num_frac >= 0.5) "counts" else "de_results"
 }
 
+#' Build a counts-assay SE; synthesizes a Sample colData / empty rowData if absent
+.counts_se <- function(mat, rowData = NULL, colData = NULL) {
+  storage.mode(mat) <- "double"
+  if (is.null(colData)) {
+    colData <- DataFrame(Sample = colnames(mat), row.names = colnames(mat))
+  }
+  if (is.null(rowData)) rowData <- DataFrame(row.names = rownames(mat))
+  SummarizedExperiment(assays = list(counts = mat),
+                       colData = colData, rowData = rowData)
+}
+
 #' Coerce a numeric matrix to a SummarizedExperiment (single "counts" assay)
 matrix_to_se <- function(m) {
   if (is.null(colnames(m))) colnames(m) <- paste0("sample_", seq_len(ncol(m)))
   if (is.null(rownames(m))) rownames(m) <- paste0("gene_", seq_len(nrow(m)))
-  storage.mode(m) <- "double"
-  SummarizedExperiment(
-    assays = list(counts = m),
-    colData = DataFrame(Sample = colnames(m), row.names = colnames(m)),
-    rowData = DataFrame(row.names = rownames(m))
-  )
+  .counts_se(m)
 }
 
 #' Coerce an edgeR DGEList to a SummarizedExperiment
 #' Reads $counts / $samples / $genes directly, so edgeR need not be installed.
 dgelist_to_se <- function(x) {
   counts <- as.matrix(x$counts)
-  storage.mode(counts) <- "double"
-  col <- if (!is.null(x$samples)) {
-    DataFrame(x$samples, check.names = FALSE)
-  } else {
-    DataFrame(Sample = colnames(counts), row.names = colnames(counts))
-  }
+  col <- if (!is.null(x$samples)) DataFrame(x$samples, check.names = FALSE)
   row <- if (!is.null(x$genes)) {
     DataFrame(x$genes, check.names = FALSE, row.names = rownames(counts))
-  } else {
-    DataFrame(row.names = rownames(counts))
   }
-  SummarizedExperiment(assays = list(counts = counts),
-                       colData = col, rowData = row)
+  .counts_se(counts, rowData = row, colData = col)
 }
 
 #' Coerce a counts-style data.frame (genes x samples) to a SummarizedExperiment
@@ -475,29 +489,18 @@ df_counts_to_se <- function(df) {
   }
   ann <- df[, !is_num, drop = FALSE]
   mat <- as.matrix(df[, is_num, drop = FALSE])
-  storage.mode(mat) <- "double"
-  gene_ids <- if (ncol(ann) >= 1) {
-    make.unique(as.character(ann[[1]]))
+  if (ncol(ann) >= 1) {
+    gene_ids <- make.unique(as.character(ann[[1]]))
+    rd <- DataFrame(ann, row.names = gene_ids, check.names = FALSE)
   } else {
-    as.character(seq_len(nrow(df)))
+    gene_ids <- as.character(seq_len(nrow(df)))
+    rd <- NULL
   }
   rownames(mat) <- gene_ids
-  rd <- if (ncol(ann) >= 1) {
-    DataFrame(ann, row.names = gene_ids, check.names = FALSE)
-  } else {
-    DataFrame(row.names = gene_ids)
-  }
-  SummarizedExperiment(
-    assays = list(counts = mat),
-    rowData = rd,
-    colData = DataFrame(Sample = colnames(mat), row.names = colnames(mat))
-  )
+  .counts_se(mat, rowData = rd)
 }
 
-#' Coerce a DE-results data.frame to a SummarizedExperiment (no assay)
-#' Rows are genes and the whole table becomes rowData, so volcano + gene-search
-#' work. Expression-based tabs (barplot, PCA) have nothing to plot for such
-#' inputs, since a DE table carries no per-sample expression.
+#' Coerce a DE-results data.frame to a SummarizedExperiment (rowData only, no assay)
 df_de_to_se <- function(df) {
   gene_ids <- rownames(df)
   default_rn <- is.null(gene_ids) ||

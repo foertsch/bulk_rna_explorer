@@ -200,3 +200,57 @@ test_that("create_pca with second group (shape aesthetic)", {
                   second_group = "Dox")
   expect_s3_class(p, "ggplot")
 })
+
+# --- compute_pca / plot_pca -----------------------------------------------
+
+test_that("compute_pca returns projection, pct_var, and sample names", {
+  se <- make_mock_se()
+  pca <- compute_pca(se, "xNorm", ntop = 100)
+  expect_true(all(c("x", "pct_var", "samples") %in% names(pca)))
+  expect_equal(nrow(pca$x), ncol(se))
+  expect_equal(pca$samples, colnames(se))
+})
+
+test_that("plot_pca builds a ggplot from a compute_pca result", {
+  se <- make_mock_se()
+  pca <- compute_pca(se, "xNorm")
+  expect_s3_class(plot_pca(pca, se, group_col = "Condition"), "ggplot")
+  expect_s3_class(
+    plot_pca(pca, se, group_col = "Condition", second_group = "Dox"),
+    "ggplot"
+  )
+})
+
+# --- classify_de_status ---------------------------------------------------
+
+test_that("classify_de_status labels UP/DOWN/NS by thresholds", {
+  status <- classify_de_status(
+    log2fc = c(2, -2, 0.5, 2),
+    fdr = c(0.01, 0.01, 0.01, 0.5),
+    fc_thresh = 1, fdr_thresh = 0.05
+  )
+  expect_equal(status, c("UP", "DOWN", "NS", "NS"))
+})
+
+# --- none_to_null ---------------------------------------------------------
+
+test_that("none_to_null maps sentinels to NULL and passes values through", {
+  expect_null(none_to_null("(none)"))
+  expect_null(none_to_null(NULL))
+  expect_null(none_to_null("None", "None"))
+  expect_equal(none_to_null("log2FC"), "log2FC")
+  expect_equal(none_to_null("None"), "None")
+})
+
+# --- select_cols ----------------------------------------------------------
+
+test_that("select_cols keeps requested columns and drops sentinels/absent", {
+  df <- data.frame(a = 1:3, b = 4:6, c = 7:9)
+  expect_equal(colnames(select_cols(df, c("a", "c"))), c("a", "c"))
+  expect_equal(colnames(select_cols(df, c("a", "(none)", "zzz"))), "a")
+})
+
+test_that("select_cols falls back to first n columns when none usable", {
+  df <- data.frame(a = 1:3, b = 4:6, c = 7:9, d = 1:3)
+  expect_equal(colnames(select_cols(df, "(none)", fallback_n = 2)), c("a", "b"))
+})
