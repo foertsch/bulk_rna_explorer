@@ -11,7 +11,8 @@ Interactive Shiny app for exploring bulk RNA-seq DESeq2/EdgeR results. Supports 
 
 ## Features
 
-- **Multi-dataset support**: Load multiple RDS files on demand, switch between contrasts
+- **Multi-format input**: Autodetects and converts `.rds` / `.qs2` / `.qs` containers (SummarizedExperiment, DESeqDataSet, DGEList, matrix, data.frame) and `.csv` / `.tsv` / `.txt` / `.parquet` / `.feather` tables (counts matrices or DE-results) into a `SummarizedExperiment`
+- **Multi-dataset support**: Load multiple files on demand, switch between contrasts
 - **Dynamic column mapping**: Auto-detects assays, grouping columns, DE statistics, and gene symbols; works with any `SummarizedExperiment`
 - **Expression barplots**: Mean + SD + jittered points, grouped by any `colData` column, optional second grouping
 - **Volcano plots**: log2FC vs -log10(FDR) with adjustable thresholds, click-to-plot, top-gene labels
@@ -39,11 +40,21 @@ Interactive Shiny app for exploring bulk RNA-seq DESeq2/EdgeR results. Supports 
 shiny::runApp("/path/to/bulk_rna_explorer")
 ```
 
-The repo ships with two toy contrasts (`data/toy_contrast_A.rds`, `data/toy_contrast_B.rds`, ~25 KB each) you can upload from the file panel. Drop your own `.rds` files alongside them, or upload via the browser.
+The repo ships with two toy contrasts (`data/toy_contrast_A.rds`, `data/toy_contrast_B.rds`, ~25 KB each) you can upload from the file panel. Drop your own files alongside them, or upload via the browser.
 
 ## Data format
 
-Input `.rds` files must contain a **`SummarizedExperiment`** object. Column mapping is done in the UI, but these defaults are auto-detected:
+Internally every dataset is a **`SummarizedExperiment`** (SE). You can load that directly, or any of several common formats that are autodetected and converted to an SE on the fly:
+
+| Format | Extensions | Holds / becomes |
+|--------|------------|-----------------|
+| R serialization | `.rds`, `.qs2`, `.qs` | `SummarizedExperiment`, `DESeqDataSet`, `DGEList`, `matrix`, or `data.frame` |
+| Delimited text | `.csv`, `.tsv`, `.txt`, `.tab` (`.gz` ok) | Counts matrix (genes x samples) or DE-results table (delimiter and table type are sniffed) |
+| Columnar | `.parquet`, `.feather` | Counts matrix or DE-results table |
+
+A DE-results table loads with no per-sample expression, so only the Volcano and Gene Search tabs apply to it. A bare counts matrix has no sample metadata, so grouped plots have nothing to group by — start from an SE / DESeqDataSet / DGEList for grouping. Optional readers (`qs2`, `qs`, `arrow`) are only needed when you open a file of that type.
+
+Column mapping is done in the UI, but these defaults are auto-detected:
 
 - **Assays**: Prefers `xNorm` if present, otherwise the first available
 - **Group column**: Prefers `Condition` (any categorical `colData` column works; `[Factor]` suffixes are tolerated)
@@ -51,7 +62,17 @@ Input `.rds` files must contain a **`SummarizedExperiment`** object. Column mapp
 - **Gene symbols**: Detects `gene_name`, `gene_symbol`, `Symbol`, `SYMBOL`, `external_gene_name`, `hgnc_symbol`
 - **DE columns**: `log2Ratio` / `log2FoldChange` for FC; `fdr` / `padj` for adjusted p-value; `pValue` / `pvalue` for raw p-value
 
-Compatible with FGCZ Sushi DESeq2/EdgeR output and standard Bioconductor DE results.
+Compatible with FGCZ Sushi DESeq2/EdgeR output and standard Bioconductor DE results. Agents (and humans) automating data prep should read [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md).
+
+### Converting files
+
+Convert any supported file to an `.rds` SummarizedExperiment from the command line:
+
+```bash
+Rscript scripts/convert_to_se.R <input> [output.rds]
+```
+
+The same logic runs live in the app on upload, via `load_dataset()` in `R/helpers.R`.
 
 ## Requirements
 
@@ -59,6 +80,7 @@ Auto-installed on first run.
 
 - **CRAN:** shiny, shinythemes, ggplot2, dplyr, colourpicker, shinyWidgets, DT, ggrepel
 - **Bioconductor:** SummarizedExperiment
+- **Optional (lazy):** `qs2` / `qs` to read those containers, `arrow` for `.parquet` / `.feather`. Only required when you open a file of that type; install on demand.
 
 ## Running the app
 
@@ -85,6 +107,9 @@ The launcher finds R on `PATH` first, then falls back to the newest install unde
 ```bash
 # Run tests
 Rscript tests/testthat.R
+
+# Convert a file (csv/tsv/qs2/qs/parquet/feather/rds) to an .rds SE
+Rscript scripts/convert_to_se.R input.csv output.rds
 
 # Regenerate toy datasets
 Rscript scripts/make_toy_data.R

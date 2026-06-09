@@ -84,8 +84,10 @@ ui <- fluidPage(
   wellPanel(
     fluidRow(
       column(5,
-        fileInput("data_files", "Load RDS file(s):",
-                  accept = c(".rds", ".RDS"), multiple = TRUE)
+        fileInput("data_files", "Load data file(s):",
+                  accept = c(".rds", ".RDS", ".qs2", ".qs", ".csv", ".tsv",
+                             ".txt", ".tab", ".parquet", ".feather", ".gz"),
+                  multiple = TRUE)
       ),
       column(5,
         selectInput("active_dataset", "Active dataset:", choices = NULL)
@@ -96,7 +98,10 @@ ui <- fluidPage(
                      style = "margin-top: 8px;")
       )
     ),
-    helpText("Files in data/ folder auto-load; uploads are added on demand. Datasets are read lazily when selected.")
+    helpText("Files in data/ folder auto-load; uploads are added on demand.",
+             "Accepts .rds / .qs2 / .qs containers and .csv / .tsv / .txt /",
+             ".parquet / .feather tables (autodetected and converted to a",
+             "SummarizedExperiment). Datasets are read lazily when selected.")
   ),
 
   # --- Main App (shown when data is loaded) ---
@@ -256,16 +261,17 @@ server <- function(input, output, session) {
   dataset_paths <- reactiveVal(list())
   dataset_cache <- reactiveVal(list())
 
-  # Discover RDS files in data/ folder on startup (paths only, no loading)
+  # Discover supported data files in data/ folder on startup (paths only)
+  data_glob <- "\\.(rds|qs2|qs|csv|tsv|txt|tab|parquet|feather)$"
   observe({
     data_dirs <- c(file.path(getwd(), "data"), "data")
     for (data_dir in data_dirs) {
       if (dir.exists(data_dir)) {
-        rds_files <- list.files(data_dir, pattern = "\\.rds$",
-                                full.names = TRUE, ignore.case = TRUE)
-        if (length(rds_files) > 0) {
-          paths <- setNames(as.list(rds_files),
-                            tools::file_path_sans_ext(basename(rds_files)))
+        found_files <- list.files(data_dir, pattern = data_glob,
+                                  full.names = TRUE, ignore.case = TRUE)
+        if (length(found_files) > 0) {
+          paths <- setNames(as.list(found_files),
+                            tools::file_path_sans_ext(basename(found_files)))
           dataset_paths(paths)
           updateSelectInput(session, "active_dataset", choices = names(paths),
                             selected = names(paths)[1])
@@ -324,22 +330,18 @@ server <- function(input, output, session) {
     data <- withProgress(
       message = paste("Loading", name, "..."), value = 0.5,
       {
-        tryCatch(readRDS(path), error = function(e) e)
+        # load_dataset autodetects the format and returns a
+        # SummarizedExperiment, or errors with an actionable message.
+        tryCatch(load_dataset(path), error = function(e) e)
       }
     )
 
     if (inherits(data, "error")) {
-      showNotification(paste("Failed to read", name, ":", conditionMessage(data)),
-                       type = "error", duration = 10)
-      req(FALSE)
-    }
-    if (!is(data, "SummarizedExperiment")) {
       showNotification(
-        paste0("'", name, "' is not a SummarizedExperiment (got: ",
-               paste(class(data), collapse = ", "), ")"),
+        paste0("Could not load '", name, "': ", conditionMessage(data)),
         type = "error", duration = 10
       )
-      # Remove invalid entry from paths
+      # Drop the entry so it does not re-error on every reactive flush
       paths[[name]] <- NULL
       dataset_paths(paths)
       updateSelectInput(session, "active_dataset",

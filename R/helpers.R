@@ -322,3 +322,223 @@ create_pca <- function(
     ) +
     theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 }
+
+# ============================================================
+# Input loading + format conversion
+# ------------------------------------------------------------
+# load_dataset(path) is the single public entry point, used by both
+# app.R (live upload) and scripts/convert_to_se.R (batch conversion).
+# It autodetects the file type, reads it, and returns a
+# SummarizedExperiment, or throws an error with an actionable message.
+#
+# Optional readers (qs2, qs, arrow) are required lazily, so they are
+# only needed when a file of that type is actually opened.
+# ============================================================
+
+#' Require an optional package, with an install hint if it is missing
+require_pkg <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    stop("Package '", pkg, "' is required to read this file. ",
+         "Install it with install.packages('", pkg, "').", call. = FALSE)
+  }
+}
+
+#' Detect a file's container type from its extension
+#' Returns one of: "rds", "qs2", "qs", "delim", "parquet", "feather",
+#' "unknown". Transparent to a trailing .gz (e.g. counts.csv.gz -> "delim").
+detect_file_type <- function(path) {
+  ext <- tolower(tools::file_ext(path))
+  if (ext == "gz") {
+    ext <- tolower(tools::file_ext(tools::file_path_sans_ext(path)))
+  }
+  switch(ext,
+    rds = "rds",
+    qs2 = "qs2",
+    qs = "qs",
+    csv = "delim",
+    tsv = "delim",
+    txt = "delim",
+    tab = "delim",
+    parquet = "parquet",
+    feather = "feather",
+    "unknown"
+  )
+}
+
+#' Sniff the field delimiter of a text file (tab, comma, or semicolon)
+#' Picks whichever character is most frequent across the first n non-empty
+#' lines; defaults to tab when nothing is found.
+sniff_delim <- function(path, n = 5) {
+  con <- file(path, "rt")
+  on.exit(close(con))
+  lines <- readLines(con, n = n, warn = FALSE)
+  lines <- lines[nzchar(lines)]
+  if (length(lines) == 0) return("\t")
+  count_char <- function(ch) {
+    sum(nchar(lines) - nchar(gsub(ch, "", lines, fixed = TRUE)))
+  }
+  cand <- c("\t" = count_char("\t"), "," = count_char(","),
+            ";" = count_char(";"))
+  if (max(cand) == 0) return("\t")
+  names(cand)[which.max(cand)]
+}
+
+#' Read any supported file into a raw R object (data.frame for tabular inputs)
+read_any <- function(path, type = detect_file_type(path)) {
+  switch(type,
+    rds = readRDS(path),
+    qs2 = {
+      require_pkg("qs2")
+      qs2::qs_read(path)
+    },
+    qs = {
+      require_pkg("qs")
+      qs::qread(path)
+    },
+    parquet = {
+      require_pkg("arrow")
+      as.data.frame(arrow::read_parquet(path), check.names = FALSE)
+    },
+    feather = {
+      require_pkg("arrow")
+      as.data.frame(arrow::read_feather(path), check.names = FALSE)
+    },
+    delim = read.delim(path, sep = sniff_delim(path), header = TRUE,
+                       check.names = FALSE, stringsAsFactors = FALSE),
+    stop("Unsupported or unrecognized file type: '", basename(path), "'. ",
+         "Supported: .rds .qs2 .qs .csv .tsv .txt .parquet .feather",
+         call. = FALSE)
+  )
+}
+
+#' Classify a loaded R object into a known shape
+#' DESeqDataSet and RangedSummarizedExperiment both inherit from
+#' SummarizedExperiment, so they report as "se" and pass through unchanged.
+classify_object <- function(obj) {
+  if (is(obj, "SummarizedExperiment")) return("se")
+  if (is(obj, "DGEList")) return("dgelist")
+  if (is.matrix(obj)) return("matrix")
+  if (is.data.frame(obj)) return("data.frame")
+  "unknown"
+}
+
+#' Heuristically classify a data.frame as a counts matrix or DE-results table
+#' A table with recognizable DE columns (log2FC / FDR / p-value) is treated as
+#' DE results; otherwise a mostly-numeric table is treated as a counts matrix.
+classify_table <- function(df) {
+  de <- detect_de_columns(colnames(df))
+  has_de <- !is.na(de$fc) || !is.na(de$fdr) || !is.na(de$pval)
+  if (has_de) return("de_results")
+  num_frac <- mean(vapply(df, is.numeric, logical(1)))
+  if (num_frac >= 0.5) "counts" else "de_results"
+}
+
+#' Coerce a numeric matrix to a SummarizedExperiment (single "counts" assay)
+matrix_to_se <- function(m) {
+  if (is.null(colnames(m))) colnames(m) <- paste0("sample_", seq_len(ncol(m)))
+  if (is.null(rownames(m))) rownames(m) <- paste0("gene_", seq_len(nrow(m)))
+  storage.mode(m) <- "double"
+  SummarizedExperiment(
+    assays = list(counts = m),
+    colData = DataFrame(Sample = colnames(m), row.names = colnames(m)),
+    rowData = DataFrame(row.names = rownames(m))
+  )
+}
+
+#' Coerce an edgeR DGEList to a SummarizedExperiment
+#' Reads $counts / $samples / $genes directly, so edgeR need not be installed.
+dgelist_to_se <- function(x) {
+  counts <- as.matrix(x$counts)
+  storage.mode(counts) <- "double"
+  col <- if (!is.null(x$samples)) {
+    DataFrame(x$samples, check.names = FALSE)
+  } else {
+    DataFrame(Sample = colnames(counts), row.names = colnames(counts))
+  }
+  row <- if (!is.null(x$genes)) {
+    DataFrame(x$genes, check.names = FALSE, row.names = rownames(counts))
+  } else {
+    DataFrame(row.names = rownames(counts))
+  }
+  SummarizedExperiment(assays = list(counts = counts),
+                       colData = col, rowData = row)
+}
+
+#' Coerce a counts-style data.frame (genes x samples) to a SummarizedExperiment
+#' Non-numeric columns (e.g. gene_id, gene_name) become rowData; the first one
+#' supplies gene identifiers. Numeric columns become the "counts" assay.
+df_counts_to_se <- function(df) {
+  is_num <- vapply(df, is.numeric, logical(1))
+  if (!any(is_num)) {
+    stop("No numeric columns found; cannot build a counts matrix.",
+         call. = FALSE)
+  }
+  ann <- df[, !is_num, drop = FALSE]
+  mat <- as.matrix(df[, is_num, drop = FALSE])
+  storage.mode(mat) <- "double"
+  gene_ids <- if (ncol(ann) >= 1) {
+    make.unique(as.character(ann[[1]]))
+  } else {
+    as.character(seq_len(nrow(df)))
+  }
+  rownames(mat) <- gene_ids
+  rd <- if (ncol(ann) >= 1) {
+    DataFrame(ann, row.names = gene_ids, check.names = FALSE)
+  } else {
+    DataFrame(row.names = gene_ids)
+  }
+  SummarizedExperiment(
+    assays = list(counts = mat),
+    rowData = rd,
+    colData = DataFrame(Sample = colnames(mat), row.names = colnames(mat))
+  )
+}
+
+#' Coerce a DE-results data.frame to a SummarizedExperiment (no assay)
+#' Rows are genes and the whole table becomes rowData, so volcano + gene-search
+#' work. Expression-based tabs (barplot, PCA) have nothing to plot for such
+#' inputs, since a DE table carries no per-sample expression.
+df_de_to_se <- function(df) {
+  gene_ids <- rownames(df)
+  default_rn <- is.null(gene_ids) ||
+    identical(gene_ids, as.character(seq_len(nrow(df))))
+  if (default_rn) {
+    char_cols <- which(vapply(df, function(x) {
+      is.character(x) || is.factor(x)
+    }, logical(1)))
+    gene_ids <- if (length(char_cols) > 0) {
+      as.character(df[[char_cols[1]]])
+    } else {
+      as.character(seq_len(nrow(df)))
+    }
+  }
+  gene_ids <- make.unique(gene_ids)
+  rd <- DataFrame(df, row.names = gene_ids, check.names = FALSE)
+  SummarizedExperiment(rowData = rd)
+}
+
+#' Coerce a supported in-memory object to a SummarizedExperiment
+coerce_to_se <- function(obj) {
+  switch(classify_object(obj),
+    se = obj,
+    dgelist = dgelist_to_se(obj),
+    matrix = matrix_to_se(obj),
+    data.frame = if (classify_table(obj) == "counts") {
+      df_counts_to_se(obj)
+    } else {
+      df_de_to_se(obj)
+    },
+    stop("Cannot convert object of class '",
+         paste(class(obj), collapse = "/"),
+         "' to a SummarizedExperiment.", call. = FALSE)
+  )
+}
+
+#' Load any supported file and return a SummarizedExperiment
+#' Single public entry point for app uploads and the CLI converter.
+load_dataset <- function(path) {
+  if (!file.exists(path)) {
+    stop("File does not exist: ", path, call. = FALSE)
+  }
+  coerce_to_se(read_any(path))
+}
