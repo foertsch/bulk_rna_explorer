@@ -10,6 +10,16 @@ data/*.rds.gz
 .Ruserdata
 .Rproj.user/
 
+# R default graphics device dump (created when a script plots with no device)
+Rplots.pdf
+
+# Local editor / agent config
+.claude/
+
+# Stray local analysis artifacts (not part of this project)
+/turnaround_waffle.png
+/scripts/turnaround_waffle.R
+
 # macOS
 .DS_Store
 

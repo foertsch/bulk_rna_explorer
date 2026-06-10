@@ -45,7 +45,7 @@ echo Leave this window open while you use the app.
 echo Close the browser tab AND this window when you are done.
 echo.
 
-"%RSCRIPT%" -e "shiny::runApp('.', launch.browser = TRUE)"
+"%RSCRIPT%" run.R
 
 if errorlevel 1 (
     echo.

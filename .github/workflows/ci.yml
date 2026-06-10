@@ -61,6 +61,79 @@ jobs:
             quit(status = 1)
           }
 
+  cleanroom-linux:
+    name: Cold-start install + launch (bare Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # Bare R image: no R packages preinstalled, repos default to source.
+    # This is the ONLY job that exercises the self-installer end to end --
+    # `run.R` bootstrapping shiny, then app.R's install_if_missing() pulling
+    # the whole CRAN + Bioconductor stack from an empty library, then a real
+    # HTTP launch. Every other job preinstalls deps via the r-lib actions and
+    # so never touches that cold-start path -- the exact path that broke a
+    # fresh-machine user (see CHANGELOG: cold-start launch fix).
+    container:
+      image: rocker/r-ver:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # System libraries needed to compile the source packages a bare image
+      # has no binaries for. Without these the cold-start install fails:
+      #   - libuv1-dev: fs (>= 2.1.0) links system libuv; its absence cascades
+      #     to sass -> bslib -> shiny and the app never launches
+      #   - curl/openssl/xml2: the httr/curl/xml2 stack
+      #   - png/jpeg/tiff/fontconfig/freetype/harfbuzz/fribidi: the
+      #     ragg/systemfonts/textshaping stack that ggplot2 pulls in
+      # curl is also used to probe the running app.
+      - name: Install system build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl \
+            libuv1-dev \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            libxml2-dev \
+            libpng-dev \
+            libjpeg-dev \
+            libtiff5-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libfribidi-dev
+
+      # Launch via run.R exactly as a user would, but headless and on a fixed
+      # port so we can probe it. The install runs synchronously inside
+      # source("run.R") before the server binds, so the poll budget below has
+      # to cover the full from-zero install, not just startup. Port-polling is
+      # reliable here (unlike the Windows job, whose Start-Process buffering
+      # forced a construction-only smoke instead).
+      - name: Cold-start launch from an empty library and probe over HTTP
+        run: |
+          LAUNCH_BROWSER=false Rscript -e 'options(shiny.port = 3838L, shiny.host = "127.0.0.1"); source("run.R")' > server.log 2>&1 &
+          SERVER_PID=$!
+          up=0
+          for i in $(seq 1 120); do
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "run.R exited before binding a port"; break
+            fi
+            if curl -fsS "http://127.0.0.1:3838/" > /dev/null 2>&1; then
+              echo "UP after ~$((i * 10))s"; up=1; break
+            fi
+            sleep 10
+          done
+          echo "===== server.log (tail) ====="
+          tail -n 40 server.log || true
+          if [ "$up" -ne 1 ]; then
+            echo "FAIL: app did not serve HTTP 200 within the budget"
+            kill "$SERVER_PID" 2>/dev/null || true
+            exit 1
+          fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3838/")
+          echo "HTTP status: $code"
+          kill "$SERVER_PID" 2>/dev/null || true
+          [ "$code" = "200" ]
+
   windows-smoke:
     name: Shiny launch smoke (windows)
     runs-on: windows-latest

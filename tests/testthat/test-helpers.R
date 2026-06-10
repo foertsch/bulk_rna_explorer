@@ -88,6 +88,18 @@ test_that("get_categorical_cols treats few-unique numerics as categorical", {
   expect_true("numeric_cov" %in% cols)
 })
 
+test_that("colData/rowData readers emit no '...' ignored warnings", {
+  # Guards the removal of the silently-ignored `check.names = FALSE` arg from
+  # as.data.frame() on SummarizedExperiment DataFrames.
+  se <- make_mock_se()
+  expect_no_warning(get_categorical_cols(se))
+  expect_no_warning(
+    create_barplot(se, "ENSG00001", "xNorm", "Condition",
+                   gene_symbol_col = "gene_name")
+  )
+  expect_no_warning(build_volcano_df(se, "log2Ratio", "fdr", "gene_name"))
+})
+
 # --- build_volcano_df -----------------------------------------------------
 
 test_that("build_volcano_df produces expected columns", {
@@ -158,6 +170,31 @@ test_that("create_barplot fails on invalid gene or assay", {
   expect_error(create_barplot(se, "ENSG00001", "bad_assay", "Condition"))
 })
 
+test_that("create_barplot y-axis label reflects the log_transform toggle", {
+  se <- make_mock_se()
+  p_log <- create_barplot(se, "ENSG00001", "xNorm", "Condition",
+                          log_transform = TRUE)
+  p_raw <- create_barplot(se, "ENSG00001", "xNorm", "Condition",
+                          log_transform = FALSE)
+  expect_match(p_log$labels$y, "^log2\\(xNorm")
+  expect_equal(p_raw$labels$y, "xNorm")
+})
+
+test_that("create_barplot tolerates FGCZ '[Factor]' colData names", {
+  se <- make_mock_se()
+  # Rename Condition -> "Condition [Factor]" as FGCZ Sushi output does
+  cd <- colData(se)
+  colnames(cd)[colnames(cd) == "Condition"] <- "Condition [Factor]"
+  colData(se) <- cd
+  # get_categorical_cols cleans the name to "Condition"; that cleaned name is
+  # what the app feeds back to create_barplot, which re-derives the match.
+  cats <- get_categorical_cols(se)
+  expect_true("Condition" %in% cats)
+  p <- create_barplot(se, "ENSG00001", "xNorm", "Condition",
+                      gene_symbol_col = "gene_name")
+  expect_s3_class(p, "ggplot")
+})
+
 # --- create_volcano -------------------------------------------------------
 
 test_that("create_volcano returns a ggplot from prepared df", {
@@ -219,6 +256,45 @@ test_that("plot_pca builds a ggplot from a compute_pca result", {
     plot_pca(pca, se, group_col = "Condition", second_group = "Dox"),
     "ggplot"
   )
+})
+
+test_that("plot_pca clamps axis choices beyond the available PCs", {
+  # 3 samples -> at most 3 PCs; asking for PC4 must not error
+  se <- make_mock_se(n_genes = 30, n_samples = 3)
+  pca <- compute_pca(se, "xNorm", ntop = 30)
+  expect_lte(ncol(pca$x), 3)
+  expect_s3_class(
+    plot_pca(pca, se, group_col = "Condition", pc_x = 1, pc_y = 4),
+    "ggplot"
+  )
+})
+
+test_that("compute_pca log_transform toggle changes the projection", {
+  se <- make_mock_se()
+  pca_log <- compute_pca(se, "xNorm", ntop = 50, log_transform = TRUE)
+  pca_raw <- compute_pca(se, "xNorm", ntop = 50, log_transform = FALSE)
+  expect_equal(dim(pca_log$x), dim(pca_raw$x))
+  expect_false(isTRUE(all.equal(pca_log$x, pca_raw$x)))
+})
+
+# --- save_plot_file -------------------------------------------------------
+
+test_that("save_plot_file writes valid PNG/PDF to a Shiny-style temp path", {
+  p <- ggplot(data.frame(x = 1:3, y = 1:3), aes(x, y)) + geom_point()
+  # Shiny hands content() tempfile(fileext = file_ext(name)); for "plot.png"
+  # that is tempfile(fileext = "png") -> ".../fileXXXXpng", a path with no real
+  # extension. ggsave() then needs `device` explicitly -- this guards the
+  # download bug where the buttons produced no file.
+  png_path <- tempfile(fileext = tools::file_ext("plot.png"))
+  save_plot_file(p, png_path, "png", width = 6, height = 4, dpi = 150)
+  expect_true(file.exists(png_path) && file.info(png_path)$size > 0)
+  expect_identical(readBin(png_path, "raw", 4L),
+                   as.raw(c(0x89, 0x50, 0x4e, 0x47)))  # PNG magic bytes
+
+  pdf_path <- tempfile(fileext = tools::file_ext("plot.pdf"))
+  save_plot_file(p, pdf_path, "pdf", width = 6, height = 4)
+  expect_true(file.exists(pdf_path) && file.info(pdf_path)$size > 0)
+  expect_identical(rawToChar(readBin(pdf_path, "raw", 5L)), "%PDF-")
 })
 
 # --- classify_de_status ---------------------------------------------------

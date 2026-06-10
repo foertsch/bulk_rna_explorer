@@ -22,9 +22,26 @@ in `tests/testthat/`.
 
 ## Launch
 
-```r
-# From an R session
-shiny::runApp("/path/to/bulk_rna_explorer")
+```bash
+# From the repo root. Installs any missing packages on first run, then serves.
+Rscript run.R
+```
+
+`run.R` bootstraps `shiny` and hands off to the app's installer for the rest, so
+it works from a clean machine where `shiny::runApp(...)` would not (that needs
+`shiny` already installed). Set `LAUNCH_BROWSER=false` for headless / CI use.
+From an R session that already has `shiny`, `shiny::runApp("/path/to/bulk_rna_explorer")`
+also works.
+
+**On Linux, install system libraries first.** Packages compile from source there
+(macOS/Windows get binaries), and a few link system libraries a minimal box
+lacks, most importantly `libuv` for `fs` (its absence cascades to `sass` ->
+`bslib` -> `shiny`). On Debian / Ubuntu:
+
+```bash
+sudo apt-get install -y libuv1-dev libcurl4-openssl-dev libssl-dev libxml2-dev \
+  libpng-dev libjpeg-dev libtiff5-dev libfontconfig1-dev libfreetype6-dev \
+  libharfbuzz-dev libfribidi-dev
 ```
 
 Files in `data/` auto-load (paths only; objects are read lazily when selected).
@@ -57,6 +74,11 @@ Column mapping is done in the UI, but sensible defaults are auto-detected
 
 These cover FGCZ Sushi DESeq2/EdgeR output and standard Bioconductor DE results.
 If your data uses different names, rename the columns or pick them in the UI.
+
+The Expression and PCA tabs `log2(x + 1)`-transform the chosen assay by default.
+If the assay is already on a log scale (vst, rlog, logCPM), tick **"Assay is
+already log-scale"** in the Column Mapping panel (or pass `log_transform = FALSE`
+to `create_barplot()` / `compute_pca()`) to skip it.
 
 ## Supported input formats (autodetection)
 
