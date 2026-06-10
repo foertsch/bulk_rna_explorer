@@ -57,18 +57,23 @@ source(file.path("R", "helpers.R"))
 
 # Register a PNG + PDF download pair for a plot reactive. The filename is
 # "<basename_fn()>_<prefix>.<ext>"; PNG gets dpi/white background, PDF is vector.
+# Saving routes through save_plot_file() (R/helpers.R), which passes `device`
+# explicitly -- required because Shiny's content() temp path has no usable
+# extension for ggsave() to infer the format from.
 register_downloads <- function(output, prefix, plot_reactive, basename_fn,
                                width, height) {
-  save_plot <- function(...) function(file) {
-    ggsave(file, plot = plot_reactive(), width = width, height = height, ...)
-  }
   output[[paste0("download_", prefix, "_png")]] <- downloadHandler(
     filename = function() paste0(basename_fn(), "_", prefix, ".png"),
-    content = save_plot(dpi = 300, bg = "white")
+    content = function(file) {
+      save_plot_file(plot_reactive(), file, "png", width, height,
+                     dpi = 300, bg = "white")
+    }
   )
   output[[paste0("download_", prefix, "_pdf")]] <- downloadHandler(
     filename = function() paste0(basename_fn(), "_", prefix, ".pdf"),
-    content = save_plot()
+    content = function(file) {
+      save_plot_file(plot_reactive(), file, "pdf", width, height)
+    }
   )
 }
 
@@ -137,6 +142,12 @@ ui <- fluidPage(
         column(4, selectInput("fc_col", "log2FC column:", choices = NULL)),
         column(4, selectInput("fdr_col", "FDR column:", choices = NULL)),
         column(4, selectInput("pval_col", "p-value column:", choices = NULL))
+      ),
+      checkboxInput(
+        "assay_is_log",
+        paste("Assay is already log-scale (skip log2 transform for",
+              "expression plot and PCA)"),
+        value = FALSE
       )
     ),
 
@@ -276,8 +287,12 @@ server <- function(input, output, session) {
   dataset_paths <- reactiveVal(list())
   dataset_cache <- reactiveVal(list())
 
-  # Discover supported data files in data/ folder on startup (paths only)
-  data_glob <- "\\.(rds|qs2|qs|csv|tsv|txt|tab|parquet|feather)$"
+  # Discover supported data files in data/ folder on startup (paths only).
+  # Trailing (.gz|.bz2|.xz) is tolerated to match detect_file_type() and the
+  # upload accept list (delimited text may be compressed).
+  data_glob <- paste0(
+    "\\.(rds|qs2|qs|csv|tsv|txt|tab|parquet|feather)(\\.(gz|bz2|xz))?$"
+  )
   observe({
     data_dirs <- c(file.path(getwd(), "data"), "data")
     for (data_dir in data_dirs) {
@@ -285,8 +300,10 @@ server <- function(input, output, session) {
         found_files <- list.files(data_dir, pattern = data_glob,
                                   full.names = TRUE, ignore.case = TRUE)
         if (length(found_files) > 0) {
-          paths <- setNames(as.list(found_files),
-                            tools::file_path_sans_ext(basename(found_files)))
+          labels <- make.unique(
+            tools::file_path_sans_ext(basename(found_files))
+          )
+          paths <- setNames(as.list(found_files), labels)
           dataset_paths(paths)
           updateSelectInput(session, "active_dataset", choices = names(paths),
                             selected = names(paths)[1])
@@ -303,6 +320,10 @@ server <- function(input, output, session) {
     for (i in seq_len(nrow(input$data_files))) {
       file_info <- input$data_files[i, ]
       label <- tools::file_path_sans_ext(file_info$name)
+      # Don't clobber an existing dataset that happens to share a basename
+      if (label %in% names(paths)) {
+        label <- make.unique(c(names(paths), label))[length(paths) + 1L]
+      }
       paths[[label]] <- file_info$datapath
     }
     dataset_paths(paths)
@@ -369,7 +390,7 @@ server <- function(input, output, session) {
   })
 
   # ---- Shared derived reactives ----
-  rd <- reactive(as.data.frame(rowData(se()), check.names = FALSE))
+  rd <- reactive(as.data.frame(rowData(se())))
   second_group_col <- reactive(none_to_null(input$second_group, "None"))
   fc_sel <- reactive(none_to_null(input$fc_col))
   fdr_sel <- reactive(none_to_null(input$fdr_col))
@@ -413,7 +434,7 @@ server <- function(input, output, session) {
   # ---- Dynamic group levels ----
   group_levels <- reactive({
     req(se(), input$group_col)
-    md <- as.data.frame(colData(se()), check.names = FALSE)
+    md <- as.data.frame(colData(se()))
     colnames(md) <- sanitize_name(colnames(md))
     col <- sanitize_name(input$group_col)
     req(col %in% colnames(md))
@@ -498,7 +519,16 @@ server <- function(input, output, session) {
 
   # ---- Expression barplot ----
   current_barplot <- reactive({
+    validate(need(
+      length(assayNames(se())) > 0,
+      paste("This dataset has no expression assay, so it cannot be plotted",
+            "here. Use the Volcano / Gene Search tabs.")
+    ))
     req(input$gene, input$assay_name, input$group_col)
+    req(input$assay_name %in% assayNames(se()))
+    # During a dataset switch input$gene may still hold a gene from the
+    # previous dataset until the selectize updates; skip until it's valid.
+    req(input$gene %in% rownames(se()))
     req(length(input$conditions) > 0)
 
     create_barplot(
@@ -510,7 +540,8 @@ server <- function(input, output, session) {
       group_levels = input$conditions,
       group_colors = current_colors(),
       ctrl_alpha = input$ctrl_alpha,
-      gene_symbol_col = gene_sym_col()
+      gene_symbol_col = gene_sym_col(),
+      log_transform = !isTRUE(input$assay_is_log)
     )
   })
 
@@ -634,12 +665,31 @@ server <- function(input, output, session) {
   # Heavy step (rowVars + prcomp) cached on se/assay/ntop; re-plotting on a
   # color, axis, or ellipse change reuses it.
   pca_data <- reactive({
-    req(se(), input$assay_name)
-    compute_pca(se(), input$assay_name, input$pca_ntop)
+    req(se(), input$assay_name, input$assay_name %in% assayNames(se()))
+    compute_pca(se(), input$assay_name, input$pca_ntop,
+                log_transform = !isTRUE(input$assay_is_log))
+  })
+
+  # Keep the PC-axis dropdowns within the number of PCs the data actually has
+  # (a dataset with k samples yields at most k PCs); otherwise selecting e.g.
+  # PC4 on a 3-sample set indexes out of bounds.
+  observeEvent(pca_data(), {
+    n_pc <- min(4L, ncol(pca_data()$x))
+    choices <- paste0("PC", seq_len(n_pc))
+    sel_x <- if (input$pca_pc_x %in% choices) input$pca_pc_x else choices[1]
+    sel_y <- if (input$pca_pc_y %in% choices) input$pca_pc_y else
+      choices[min(2L, n_pc)]
+    updateSelectInput(session, "pca_pc_x", choices = choices, selected = sel_x)
+    updateSelectInput(session, "pca_pc_y", choices = choices, selected = sel_y)
   })
 
   current_pca <- reactive({
-    req(input$group_col)
+    validate(need(
+      length(assayNames(se())) > 0,
+      paste("This dataset has no expression assay, so PCA cannot be computed.",
+            "Use the Volcano / Gene Search tabs.")
+    ))
+    req(input$group_col, input$pca_pc_x, input$pca_pc_y)
     plot_pca(
       pca_data(), se(),
       group_col = input$group_col,
