@@ -36,11 +36,30 @@ Interactive Shiny app for exploring bulk RNA-seq DESeq2/EdgeR results. Supports 
 
 ## Quick start
 
-```r
-shiny::runApp("/path/to/bulk_rna_explorer")
+```bash
+# from the repo root - installs missing dependencies on first run, then launches
+Rscript run.R
 ```
 
+Already have shiny in an R session? `shiny::runApp(".")` works too.
+
 The repo ships with two toy contrasts (`data/toy_contrast_A.rds`, `data/toy_contrast_B.rds`, ~25 KB each) you can upload from the file panel. Drop your own files alongside them, or upload via the browser.
+
+## Use with an AI coding agent
+
+This repo is built to be installed and run by an AI coding agent straight from its own documentation. Dependency installation is self-bootstrapping (`app.R` installs what it needs on first run), and the data contract, supported formats, and conversion API are documented for agents in [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md).
+
+Point your agent at the repo with a prompt like:
+
+```text
+Clone https://github.com/foertsch/bulk_rna_explorer and get it running.
+It's an R Shiny app for exploring bulk RNA-seq DE results. Read the README
+and docs/AGENT_GUIDE.md, install the dependencies, launch the app, and
+confirm it serves over HTTP. Then load one of the toy datasets in data/ and
+show me a plot.
+```
+
+This path has been validated end-to-end: given only the repo on a machine with R but no packages installed, a coding agent found the docs, installed the full CRAN + Bioconductor stack from scratch, and got the app serving, no hand-holding.
 
 ## Data format
 
@@ -62,6 +81,8 @@ Column mapping is done in the UI, but these defaults are auto-detected:
 - **Gene symbols**: Detects `gene_name`, `gene_symbol`, `Symbol`, `SYMBOL`, `external_gene_name`, `hgnc_symbol`
 - **DE columns**: `log2Ratio` / `log2FoldChange` for FC; `fdr` / `padj` for adjusted p-value; `pValue` / `pvalue` for raw p-value
 
+The Expression and PCA tabs apply a `log2(x + 1)` transform by default. If the assay you map is already on a log scale (vst, rlog, logCPM), tick **"Assay is already log-scale"** in the Column Mapping panel to skip it and avoid double-transforming.
+
 Compatible with FGCZ Sushi DESeq2/EdgeR output and standard Bioconductor DE results. Agents (and humans) automating data prep should read [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md).
 
 ### Converting files
@@ -82,14 +103,26 @@ Auto-installed on first run.
 - **Bioconductor:** SummarizedExperiment
 - **Optional (lazy):** `qs2` / `qs` to read those containers, `arrow` for `.parquet` / `.feather`. Only required when you open a file of that type; install on demand.
 
-## Running the app
+### Linux: system libraries
 
-```r
-# R console
-shiny::runApp("/path/to/bulk_rna_explorer")
+On macOS and Windows the R packages install as prebuilt binaries, so nothing extra is needed. On Linux they compile from source, and a few of them link system libraries that a minimal install may lack (notably `libuv`, which `fs` requires; missing it cascades to `sass` -> `bslib` -> `shiny`). On Debian / Ubuntu, install these once before the first launch:
+
+```bash
+sudo apt-get install -y libuv1-dev libcurl4-openssl-dev libssl-dev libxml2-dev \
+  libpng-dev libjpeg-dev libtiff5-dev libfontconfig1-dev libfreetype6-dev \
+  libharfbuzz-dev libfribidi-dev
 ```
 
-Or open `app.R` in RStudio and click **Run App**. The same command works on macOS, Linux, and Windows; no platform-specific setup is required beyond having R installed.
+(On Fedora / RHEL the equivalents are `libuv-devel`, `libcurl-devel`, `openssl-devel`, `libxml2-devel`, etc.) The CI `cleanroom-linux` job installs exactly this set and verifies a from-zero install on a bare image still launches.
+
+## Running the app
+
+```bash
+# from the repo root - bootstraps shiny if needed, app.R installs the rest, then launches
+Rscript run.R
+```
+
+From an R session that already has shiny, `shiny::runApp("/path/to/bulk_rna_explorer")` works too, as does opening `app.R` in RStudio and clicking **Run App**. The same launcher works on macOS, Linux, and Windows; no platform-specific setup is required beyond having R installed. For headless / CI use, set `LAUNCH_BROWSER=false` so the app serves without trying to open a browser.
 
 ### Windows desktop shortcut
 
@@ -105,6 +138,9 @@ The launcher finds R on `PATH` first, then falls back to the newest install unde
 ## Development
 
 ```bash
+# One-time: install dev dependencies (test + lint tooling, not needed to run the app)
+Rscript -e 'install.packages(c("testthat", "lintr"), repos = "https://cloud.r-project.org")'
+
 # Run tests
 Rscript tests/testthat.R
 

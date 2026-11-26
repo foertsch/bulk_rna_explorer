@@ -53,7 +53,7 @@ detect_gene_col <- function(rd_cols) {
 
 #' Get categorical colData columns
 get_categorical_cols <- function(se) {
-  md <- as.data.frame(colData(se), check.names = FALSE)
+  md <- as.data.frame(colData(se))
   colnames(md) <- sanitize_name(colnames(md))
   cat_cols <- names(md)[sapply(md, function(x) {
     is.factor(x) || is.character(x) || (is.numeric(x) && length(unique(x)) <= 10)
@@ -80,19 +80,19 @@ select_cols <- function(df, cols, fallback_n = 5) {
 create_barplot <- function(
     se, gene, assay_name, group_col, second_group = NULL,
     group_levels = NULL, group_colors = NULL,
-    ctrl_alpha = 0.5, gene_symbol_col = NULL,
+    ctrl_alpha = 0.5, gene_symbol_col = NULL, log_transform = TRUE,
     point_color = "black", jitter_width = 0.12,
     dodge_width = 0.8, bar_width = 0.7, err_width = 0.2
 ) {
   stopifnot(gene %in% rownames(se))
   stopifnot(assay_name %in% assayNames(se))
 
-  md <- as.data.frame(colData(se), check.names = FALSE)
+  md <- as.data.frame(colData(se))
   colnames(md) <- sanitize_name(colnames(md))
   group_col <- sanitize_name(group_col)
   stopifnot(group_col %in% colnames(md))
 
-  rd <- as.data.frame(rowData(se), check.names = FALSE)
+  rd <- as.data.frame(rowData(se))
 
   # Gene symbol for title
   gene_symbol <- gene
@@ -109,7 +109,7 @@ create_barplot <- function(
     dplyr::transmute(
       sample = sample,
       value = value,
-      value_log2 = log2(value + 1),
+      value_plot = if (log_transform) log2(value + 1) else value,
       Group = .data[[group_col]]
     )
 
@@ -144,13 +144,13 @@ create_barplot <- function(
   if (has_second) {
     df_sum <- df %>%
       group_by(Group, SecondGroup) %>%
-      summarise(mean = mean(value_log2, na.rm = TRUE),
-                sd = sd(value_log2, na.rm = TRUE), .groups = "drop")
+      summarise(mean = mean(value_plot, na.rm = TRUE),
+                sd = sd(value_plot, na.rm = TRUE), .groups = "drop")
   } else {
     df_sum <- df %>%
       group_by(Group) %>%
-      summarise(mean = mean(value_log2, na.rm = TRUE),
-                sd = sd(value_log2, na.rm = TRUE), .groups = "drop")
+      summarise(mean = mean(value_plot, na.rm = TRUE),
+                sd = sd(value_plot, na.rm = TRUE), .groups = "drop")
   }
 
   pd <- position_dodge(width = dodge_width)
@@ -174,7 +174,7 @@ create_barplot <- function(
                         group = SecondGroup),
                     width = err_width, position = pd) +
       geom_point(data = df,
-                 aes(x = Group, y = value_log2, group = SecondGroup),
+                 aes(x = Group, y = value_plot, group = SecondGroup),
                  position = position_jitterdodge(
                    jitter.width = jitter_width, dodge.width = dodge_width),
                  size = 2, alpha = 0.9, color = point_color) +
@@ -188,7 +188,7 @@ create_barplot <- function(
                     aes(x = Group, ymin = mean - sd, ymax = mean + sd),
                     width = err_width) +
       geom_point(data = df,
-                 aes(x = Group, y = value_log2),
+                 aes(x = Group, y = value_plot),
                  position = position_jitter(width = jitter_width),
                  size = 2, alpha = 0.9, color = point_color)
   }
@@ -197,8 +197,10 @@ create_barplot <- function(
     p <- p + scale_fill_manual(values = group_colors, drop = FALSE)
   }
 
+  y_lab <- if (log_transform) sprintf("log2(%s + 1)", assay_name) else assay_name
+
   p + theme_bw(base_size = 14) +
-    labs(title = gene_symbol, x = NULL, y = "log2(normalized counts + 1)") +
+    labs(title = gene_symbol, x = NULL, y = y_lab) +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           plot.title = element_text(hjust = 0.5, face = "bold")) +
     guides(fill = guide_legend(title = sanitize_name(group_col)))
@@ -216,7 +218,7 @@ classify_de_status <- function(log2fc, fdr, fc_thresh, fdr_thresh) {
 #' Build volcano data frame from rowData (with gene_id, log2FC, fdr, symbol, Status)
 build_volcano_df <- function(se, fc_col, fdr_col, gene_symbol_col = NULL,
                              fc_thresh = 1, fdr_thresh = 0.05) {
-  rd <- as.data.frame(rowData(se), check.names = FALSE)
+  rd <- as.data.frame(rowData(se))
   if (is.null(fc_col) || is.null(fdr_col)) return(NULL)
 
   df <- data.frame(
@@ -276,10 +278,13 @@ create_volcano <- function(df, fc_col = "log2FC", fdr_col = "FDR",
 }
 
 #' Run PCA on the top-N variable genes (the heavy step: rowVars + prcomp)
-#' Returned value depends only on se/assay/ntop, so callers can cache it and
-#' re-plot (different axes, colors, ellipses) without recomputing.
-compute_pca <- function(se, assay_name, ntop = 500) {
-  mat <- log2(assay(se, assay_name) + 1)
+#' Returned value depends only on se/assay/ntop/log_transform, so callers can
+#' cache it and re-plot (different axes, colors, ellipses) without recomputing.
+#' Set log_transform = FALSE when the assay is already on a log scale (vst,
+#' rlog, logCPM) to avoid double-transforming.
+compute_pca <- function(se, assay_name, ntop = 500, log_transform = TRUE) {
+  mat <- assay(se, assay_name)
+  if (log_transform) mat <- log2(mat + 1)
   rv <- rowVars(mat, na.rm = TRUE)
   ntop <- min(ntop, nrow(mat))
   select_genes <- order(rv, decreasing = TRUE)[seq_len(ntop)]
@@ -295,10 +300,16 @@ compute_pca <- function(se, assay_name, ntop = 500) {
 plot_pca <- function(pca, se, group_col, second_group = NULL,
                      group_colors = NULL, pc_x = 1, pc_y = 2,
                      show_ellipses = FALSE) {
-  md <- as.data.frame(colData(se), check.names = FALSE)
+  md <- as.data.frame(colData(se))
   colnames(md) <- sanitize_name(colnames(md))
   group_col <- sanitize_name(group_col)
   pct_var <- pca$pct_var
+
+  # Guard against axis choices beyond the number of PCs the data actually has
+  # (a dataset with k samples yields at most k PCs).
+  n_pc <- ncol(pca$x)
+  pc_x <- min(pc_x, n_pc)
+  pc_y <- min(pc_y, n_pc)
 
   pca_df <- data.frame(
     Sample = pca$samples,
@@ -348,9 +359,20 @@ plot_pca <- function(pca, se, group_col, second_group = NULL,
 #' Create PCA plot (compute + plot in one call)
 create_pca <- function(se, assay_name, group_col, second_group = NULL,
                        group_colors = NULL, ntop = 500,
-                       pc_x = 1, pc_y = 2, show_ellipses = FALSE) {
-  plot_pca(compute_pca(se, assay_name, ntop), se, group_col, second_group,
-           group_colors, pc_x, pc_y, show_ellipses)
+                       pc_x = 1, pc_y = 2, show_ellipses = FALSE,
+                       log_transform = TRUE) {
+  plot_pca(compute_pca(se, assay_name, ntop, log_transform), se, group_col,
+           second_group, group_colors, pc_x, pc_y, show_ellipses)
+}
+
+#' Save a ggplot to `file` with an explicit device.
+#' Shiny's downloadHandler hands content() a tempfile whose extension is
+#' appended with no separator (".../fileXXXXpng"), so ggsave() cannot infer the
+#' format from the path -- `device` must be passed explicitly or it errors.
+save_plot_file <- function(plot, file, device, width, height, ...) {
+  ggsave(file, plot = plot, device = device, width = width, height = height,
+         ...)
+  invisible(file)
 }
 
 # ---- Input loading + format conversion ----

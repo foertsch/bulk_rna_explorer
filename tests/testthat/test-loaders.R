@@ -149,6 +149,19 @@ test_that("load_dataset reads a TSV counts matrix", {
   expect_true("counts" %in% assayNames(se))
 })
 
+test_that("load_dataset reads a gzipped CSV counts matrix", {
+  df <- data.frame(gene_id = c("g1", "g2"), s1 = c(1, 2), s2 = c(3, 4),
+                   stringsAsFactors = FALSE)
+  tmp <- tempfile(fileext = ".csv.gz")
+  con <- gzfile(tmp, "wt")
+  write.csv(df, con, row.names = FALSE)
+  close(con)
+  se <- load_dataset(tmp)
+  expect_true(is(se, "SummarizedExperiment"))
+  expect_equal(dim(se), c(2, 2))
+  expect_true("counts" %in% assayNames(se))
+})
+
 test_that("load_dataset reads a DE-results CSV into rowData", {
   de <- data.frame(gene_name = c("A", "B"), log2FoldChange = c(3, -3),
                    padj = c(0.001, 0.002), stringsAsFactors = FALSE)
