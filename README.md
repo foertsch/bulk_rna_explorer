@@ -1,6 +1,10 @@
 # bulk_rna_explorer
 
-![CI](https://github.com/foertsch/bulk_rna_explorer/actions/workflows/ci.yml/badge.svg)
+[![Tests](https://github.com/foertsch/bulk_rna_explorer/actions/workflows/ci.yml/badge.svg)](https://github.com/foertsch/bulk_rna_explorer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/foertsch/bulk_rna_explorer.svg)](LICENSE)
+[![R](https://img.shields.io/badge/R-release-blue?logo=r)](https://www.r-project.org/)
+[![Shiny](https://img.shields.io/badge/Shiny-app-447099?logo=rstudio)](https://shiny.posit.co/)
+[![Views](https://hits.sh/github.com/foertsch/bulk_rna_explorer.svg?label=views)](https://hits.sh/github.com/foertsch/bulk_rna_explorer/)
 
 Interactive Shiny app for exploring bulk RNA-seq DESeq2/EdgeR results. Supports multiple contrasts, dynamic column mapping, expression barplots, volcano plots, and PCA plots.
 
