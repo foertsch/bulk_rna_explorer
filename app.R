@@ -203,7 +203,7 @@ ui <- fluidPage(
           condition = "input.main_tabs == 'PCA Plot'",
           h4("PCA Options"),
           numericInput("pca_ntop", "Top N variable genes:",
-                       value = 500, min = 10, max = 10000, step = 50),
+                       value = 2000, min = 10, max = 10000, step = 50),
           fluidRow(
             column(6, selectInput("pca_pc_x", "X axis:", choices = paste0("PC", 1:4),
                                   selected = "PC1")),

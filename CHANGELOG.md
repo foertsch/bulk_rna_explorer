@@ -48,6 +48,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   `detect_file_type()`
 - PCA and Expression tabs now show an explanatory message for datasets with no
   expression assay (e.g. a DE-results-only table) instead of rendering blank
+- PCA: the default is now the top 2000 variable genes (was 500), both in the
+  app's "Top N variable genes" input and in `compute_pca()` / `create_pca()`.
+  Set `ntop = 500` (or the input) to reproduce earlier plots
 - CI: extended `testthat` job to a matrix covering Ubuntu and macOS
   (previously Ubuntu only). Windows Shiny construction smoke remains a
   separate job.

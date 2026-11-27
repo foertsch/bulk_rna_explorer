@@ -282,7 +282,7 @@ create_volcano <- function(df, fc_col = "log2FC", fdr_col = "FDR",
 #' cache it and re-plot (different axes, colors, ellipses) without recomputing.
 #' Set log_transform = FALSE when the assay is already on a log scale (vst,
 #' rlog, logCPM) to avoid double-transforming.
-compute_pca <- function(se, assay_name, ntop = 500, log_transform = TRUE) {
+compute_pca <- function(se, assay_name, ntop = 2000, log_transform = TRUE) {
   mat <- assay(se, assay_name)
   if (log_transform) mat <- log2(mat + 1)
   rv <- rowVars(mat, na.rm = TRUE)
@@ -358,7 +358,7 @@ plot_pca <- function(pca, se, group_col, second_group = NULL,
 
 #' Create PCA plot (compute + plot in one call)
 create_pca <- function(se, assay_name, group_col, second_group = NULL,
-                       group_colors = NULL, ntop = 500,
+                       group_colors = NULL, ntop = 2000,
                        pc_x = 1, pc_y = 2, show_ellipses = FALSE,
                        log_transform = TRUE) {
   plot_pca(compute_pca(se, assay_name, ntop, log_transform), se, group_col,
