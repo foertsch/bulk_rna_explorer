@@ -248,6 +248,17 @@ test_that("compute_pca returns projection, pct_var, and sample names", {
   expect_equal(pca$samples, colnames(se))
 })
 
+test_that("compute_pca and create_pca default to the top 2000 variable genes", {
+  expect_equal(formals(compute_pca)$ntop, 2000)
+  expect_equal(formals(create_pca)$ntop, 2000)
+
+  # More genes than the default: the default must select exactly 2000 of them.
+  se <- make_mock_se(n_genes = 2500, n_samples = 8)
+  default <- compute_pca(se, "xNorm")
+  expect_equal(default$x, compute_pca(se, "xNorm", ntop = 2000)$x)
+  expect_false(isTRUE(all.equal(default$x, compute_pca(se, "xNorm", ntop = 500)$x)))
+})
+
 test_that("plot_pca builds a ggplot from a compute_pca result", {
   se <- make_mock_se()
   pca <- compute_pca(se, "xNorm")
