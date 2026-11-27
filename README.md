@@ -1,10 +1,10 @@
 # bulk_rna_explorer
 
-[![Tests](https://github.com/foertsch/bulk_rna_explorer/actions/workflows/ci.yml/badge.svg)](https://github.com/foertsch/bulk_rna_explorer/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/github/license/foertsch/bulk_rna_explorer.svg)](LICENSE)
-[![R](https://img.shields.io/badge/R-release-blue?logo=r)](https://www.r-project.org/)
-[![Shiny](https://img.shields.io/badge/Shiny-app-447099?logo=rstudio)](https://shiny.posit.co/)
-[![Views](https://hits.sh/github.com/foertsch/bulk_rna_explorer.svg?label=views)](https://hits.sh/github.com/foertsch/bulk_rna_explorer/)
+[![Tests](https://img.shields.io/github/actions/workflow/status/foertsch/bulk_rna_explorer/ci.yml?branch=main&label=tests&style=flat-square)](https://github.com/foertsch/bulk_rna_explorer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/foertsch/bulk_rna_explorer?style=flat-square)](LICENSE)
+[![R](https://img.shields.io/badge/R-release-blue?logo=r&style=flat-square)](https://www.r-project.org/)
+[![Shiny](https://img.shields.io/badge/Shiny-app-447099?logo=rstudio&style=flat-square)](https://shiny.posit.co/)
+[![Views](https://hits.sh/github.com/foertsch/bulk_rna_explorer.svg?label=views&style=flat-square)](https://hits.sh/github.com/foertsch/bulk_rna_explorer/)
 
 Interactive Shiny app for exploring bulk RNA-seq DESeq2/EdgeR results. Supports multiple contrasts, dynamic column mapping, expression barplots, volcano plots, and PCA plots.
 
